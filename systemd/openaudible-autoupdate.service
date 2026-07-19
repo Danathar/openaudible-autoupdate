@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for and install OpenAudible updates
+
+[Service]
+Type=oneshot
+# Runs the script from ~/bin. If OpenAudible is installed inside a
+# distrobox/toolbox container rather than directly on the host, wrap the
+# call, e.g.:
+#   ExecStart=/usr/bin/distrobox enter <container-name> -- %h/bin/openaudible-autoupdate.sh
+ExecStart=%h/bin/openaudible-autoupdate.sh

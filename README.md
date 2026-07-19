@@ -1,0 +1,108 @@
+# openaudible-autoupdate
+
+> [!NOTE]
+> This was created with some AI. It's pretty easy to read the code, but you should know this.
+
+OpenAudible ships standalone installers (`.rpm`, `.deb`, `.sh`, `.AppImage`, ...)
+with no package repository behind them, so `dnf`/`apt`/etc. never see new
+releases. This is a small script + systemd timer that checks OpenAudible's
+own version manifest and upgrades the installed rpm automatically.
+
+## How it works
+
+`openaudible-autoupdate.sh`:
+
+1. Reads the installed version with `rpm -q OpenAudible`.
+2. Fetches `https://openaudible.org/downloads/swt_version.json`, which lists
+   the current release version and, per platform, a download URL and
+   `sha256` checksum.
+3. If the manifest's version is newer than what's installed, downloads the
+   rpm, verifies its checksum, and runs `sudo dnf install -y` on it.
+4. Logs to stdout/`systemd-cat` and sends a desktop notification (if
+   `notify-send` is available) on a successful upgrade.
+
+If OpenAudible isn't installed via rpm, or is already current, the script
+exits cleanly and does nothing.
+
+## Requirements
+
+- `bash`
+- `curl`, `jq`, `rpm`, `dnf`, `sha256sum`
+- passwordless (or otherwise non-interactive) `sudo` for `dnf install`,
+  since the timer runs unattended
+
+## Install
+
+```bash
+mkdir -p ~/bin
+cp openaudible-autoupdate.sh ~/bin/
+chmod +x ~/bin/openaudible-autoupdate.sh
+
+mkdir -p ~/.config/systemd/user
+cp systemd/openaudible-autoupdate.service systemd/openaudible-autoupdate.timer ~/.config/systemd/user/
+
+systemctl --user daemon-reload
+systemctl --user enable --now openaudible-autoupdate.timer
+```
+
+### Running inside a container (distrobox/toolbox)
+
+If OpenAudible is installed inside a distrobox/toolbox rather than directly
+on the host, the systemd user timer still runs on the **host** (containers
+generally don't run systemd), so point `ExecStart` at the container instead
+of the script directly. Edit
+`~/.config/systemd/user/openaudible-autoupdate.service`:
+
+```ini
+ExecStart=/usr/bin/distrobox enter <container-name> -- %h/bin/openaudible-autoupdate.sh
+```
+
+(assuming your home directory is shared into the container, which is the
+distrobox default). Then `systemctl --user daemon-reload` and restart the
+timer.
+
+Rather than editing the tracked unit file directly, consider a local
+[systemd drop-in](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html#Unit%20File%20Load%20Path)
+instead, so host-specific details (container name, etc.) stay out of the
+repo:
+
+```bash
+mkdir -p ~/.config/systemd/user/openaudible-autoupdate.service.d
+cat > ~/.config/systemd/user/openaudible-autoupdate.service.d/override.conf <<'EOF'
+[Service]
+ExecStart=
+ExecStart=/usr/bin/distrobox enter <container-name> -- %h/bin/openaudible-autoupdate.sh
+EOF
+systemctl --user daemon-reload
+```
+
+## Configuration
+
+The script honors these environment variables if you need to point it at a
+different manifest/package/platform:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `VERSION_URL` | `https://openaudible.org/downloads/swt_version.json` | Version manifest URL |
+| `PKG_NAME` | `OpenAudible` | rpm package name to check/upgrade |
+| `PLATFORM_KEY` | `linux_x86_64_rpm` | Key under `.platforms` in the manifest to use |
+
+Set them in the systemd service via `Environment=`, or export them before
+running the script manually.
+
+## Usage
+
+```bash
+# Run a check on demand
+systemctl --user start openaudible-autoupdate.service
+
+# View update history
+journalctl --user -u openaudible-autoupdate.service
+
+# Disable
+systemctl --user disable --now openaudible-autoupdate.timer
+```
+
+## License
+
+GPL-3.0-only, see [LICENSE](LICENSE).
