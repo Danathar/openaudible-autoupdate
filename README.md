@@ -54,6 +54,12 @@ systemctl --user enable --now openaudible-autoupdate.timer
 
 ### Running inside a container (distrobox/toolbox)
 
+This support exists because the author runs a bootc-based, partially
+immutable distro ([Aurora](https://getaurora.dev/)), where apps like
+OpenAudible that expect a mutable `/usr` and traditional rpm/dnf install
+don't go on the host itself — they go in a
+[distrobox](https://distrobox.it/)/toolbox container instead.
+
 If OpenAudible is installed inside a distrobox/toolbox rather than directly
 on the host, the systemd user timer still runs on the **host** (containers
 generally don't run systemd), so point `ExecStart` at the container instead
