@@ -26,12 +26,19 @@ exits cleanly and does nothing.
 
 ## Requirements
 
+- OpenAudible already installed from the official `.rpm` (see
+  [openaudible.org/download](https://openaudible.org/download)) — this repo
+  only keeps an existing rpm install up to date, it does not install
+  OpenAudible itself
 - `bash`
 - `curl`, `jq`, `rpm`, `dnf`, `sha256sum`
 - passwordless (or otherwise non-interactive) `sudo` for `dnf install`,
   since the timer runs unattended
 
 ## Install
+
+This installs the update-checker (script + systemd timer) described above,
+assuming OpenAudible's rpm is already installed.
 
 ```bash
 mkdir -p ~/bin
