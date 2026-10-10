@@ -118,12 +118,14 @@ assert_tmp_clean() {
 }
 
 # assert_rejected_before_download MESSAGE: the run failed on manifest
-# validation, so nothing was downloaded, verified or installed.
+# validation, so nothing was downloaded, verified or installed. Only curl
+# calls are checked for /dl/: the logged message may echo a bad download_dir.
 assert_rejected_before_download() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"$1"* ]]
   [[ "$output" != *"Checksum verified."* ]]
-  [[ "$(calls)" != *"/dl/"* ]]
+  [ -z "$(calls | grep '^curl .*/dl/')" ]
+  [[ "$(calls)" == *"curl "*"swt_version.json"* ]]
   [[ "$(calls)" != *"sudo "* ]]
   [[ "$(calls)" != *"dnf "* ]]
   assert_tmp_clean
