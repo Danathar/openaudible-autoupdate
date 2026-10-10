@@ -120,23 +120,43 @@ test('bot-authored PR without signature line violates signature', () => {
     assert.deepEqual(auditPr(pr({ body: 'Closes #5' })), ['signature']);
 });
 
-test('bot self-merge is a violation, in either login spelling', () => {
+test('a merge by the Hive App is the allowed Hive lane, in either login spelling', () => {
     for (const login of ['app/danathar-atomic-hive', 'danathar-atomic-hive[bot]']) {
-        assert.deepEqual(auditPr(pr({ mergedBy: { login } })), ['human-merge']);
+        assert.deepEqual(auditPr(pr({ mergedBy: { login } })), []);
+        assert.deepEqual(
+            auditPr(pr({ author: { login }, mergedBy: { login } })),
+            []
+        );
     }
+});
+
+test('any other bot merger or an unknown merger is a violation', () => {
     assert.deepEqual(auditPr(pr({ mergedBy: null })), ['human-merge']);
+    assert.deepEqual(auditPr(pr({ mergedBy: {} })), ['human-merge']);
     assert.deepEqual(
         auditPr(pr({ mergedBy: { login: 'x', is_bot: true } })),
         ['human-merge']
     );
+    assert.deepEqual(
+        auditPr(pr({ mergedBy: { login: 'dependabot[bot]' } })),
+        ['human-merge']
+    );
+    assert.deepEqual(
+        auditPr(pr({ mergedBy: { login: 'app/some-other-app' } })),
+        ['human-merge']
+    );
 });
 
-test('a risk-tier-looking label does not excuse a bot merge', () => {
-    const p = pr({
-        mergedBy: { login: 'app/danathar-atomic-hive' },
-        labels: [{ name: 'risk/tier-4' }],
-    });
-    assert.deepEqual(auditPr(p), ['human-merge']);
+test('the report counts Hive-lane merges separately and marks the row', () => {
+    const r = buildReport([
+        pr({ number: 1 }),
+        pr({ number: 2, mergedBy: { login: 'app/danathar-atomic-hive' } }),
+    ]);
+    assert.equal(r.hiveLane, 1);
+    assert.equal(r.violationCount, 0);
+    const md = renderMarkdown(r);
+    assert.match(md, /app\/danathar-atomic-hive \(Hive lane\)/);
+    assert.match(md, /1 of 2 audited agent PR\(s\) were merged by the Hive lane/);
 });
 
 test('base must be main of this repository', () => {
@@ -201,7 +221,7 @@ function run(argv, input) {
 }
 
 test('exit code: non-strict never fails on violations, strict does', () => {
-    const bad = [pr({ mergedBy: { login: 'danathar-atomic-hive[bot]' } })];
+    const bad = [pr({ mergedBy: { login: 'some-other-app[bot]', is_bot: true } })];
     assert.equal(run(['--output', 'x.md'], bad).code, 0);
     assert.equal(run(['--output', 'x.md', '--strict'], bad).code, 1);
     assert.equal(run(['--output', 'x.md', '--strict'], [pr()]).code, 0);

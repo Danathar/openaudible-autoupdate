@@ -21,11 +21,13 @@
  *                  Danathar/openaudible-autoupdate (body text is not consulted; a missing
  *                  field counts as no link)
  *   signature      body has a `— hive: agent=...` line
- *   human-merge    merged by a human account, not the Hive app or any bot.
- *                  A risk tier in docs/risk-tiers.md may allow an agent to queue
- *                  low-risk PRs under the Hive merge strategy, but the PR JSON
- *                  carries no changed-file list to derive a tier from, so every
- *                  bot merge is reported; a reviewer can then confirm the tier.
+ *   human-merge    merged by a human account or by the Hive App itself. This
+ *                  repository uses the `hive-serialized` merge strategy: the
+ *                  App (`app/danathar-atomic-hive`) merges agent PRs once the
+ *                  required checks pass, so that merge is the Hive lane, which
+ *                  is allowed and counted separately ("Hive lane" in the
+ *                  report, also when the App authored the PR). A merge by any
+ *                  other bot, or with no recorded merger, is a violation.
  *   base           base branch is `main` of Danathar/openaudible-autoupdate
  *
  * Usage:
@@ -123,6 +125,11 @@ export function isBotAccount(user) {
     );
 }
 
+/** True for the Hive GitHub App, in either `gh` or REST spelling. */
+export function isHiveApp(user) {
+    return AGENT_LOGINS.includes(user?.login);
+}
+
 /**
  * Checks one agent PR. Returns the list of violated requirement ids.
  * @param {object} pr
@@ -133,8 +140,12 @@ export function auditPr(pr) {
     if (!hasLinkedIssue(pr)) violations.push('linked-issue');
     if (!findSignature(pr.body)) violations.push('signature');
 
+    // The Hive App merging an agent PR is the hive-serialized lane: allowed.
+    // Any other bot, or no recorded merger, is a violation.
     const mergedBy = pr.mergedBy;
-    if (!mergedBy || !mergedBy.login || isBotAccount(mergedBy)) {
+    if (!mergedBy || !mergedBy.login) {
+        violations.push('human-merge');
+    } else if (isBotAccount(mergedBy) && !isHiveApp(mergedBy)) {
         violations.push('human-merge');
     }
 
@@ -171,6 +182,7 @@ export function buildReport(prs, options = {}) {
             mergedBy: pr.mergedBy?.login ?? 'unknown',
             mergedAt: (pr.mergedAt ?? '').slice(0, 10),
             violations: auditPr(pr),
+            hiveLane: isHiveApp(pr.mergedBy),
         });
     }
     const violating = rows.filter((r) => r.violations.length > 0);
@@ -181,6 +193,7 @@ export function buildReport(prs, options = {}) {
         nonAgent,
         rows,
         violationCount: violating.length,
+        hiveLane: rows.filter((r) => r.hiveLane).length,
     };
 }
 
@@ -211,10 +224,12 @@ export function renderMarkdown(report) {
                 ? 'ok'
                 : `violates: ${r.violations.join(', ')}`;
         out.push(
-            `| [#${r.number}](${r.url}) ${cell(r.title)} | ${r.mergedAt} | ${r.detected} | ${cell(r.author)} | ${cell(r.mergedBy)} | ${result} |`
+            `| [#${r.number}](${r.url}) ${cell(r.title)} | ${r.mergedAt} | ${r.detected} | ${cell(r.author)} | ${cell(r.mergedBy)}${r.hiveLane ? ' (Hive lane)' : ''} | ${result} |`
         );
     }
     out.push(
+        '',
+        `${report.hiveLane} of ${report.agent} audited agent PR(s) were merged by the Hive lane (the Hive App itself, allowed under the hive-serialized merge strategy).`,
         '',
         report.violationCount === 0
             ? 'All audited agent PRs meet the audit-trail requirements.'

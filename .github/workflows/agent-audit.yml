@@ -6,7 +6,7 @@ name: Agent audit trail
 # Agent PRs here are opened by the Hive GitHub App (`app/danathar-atomic-hive`)
 # and end with a signature line `— hive: agent=<name> ...`. For each one the
 # script checks: a linked issue (GitHub's resolved closingIssuesReferences, not body text), the signature line,
-# a human merger (the bot must not merge its own PR), and base `main` of
+# a merger that is a human or the Hive App itself (the hive-serialized lane, reported separately; any other bot or an unknown merger is a violation), and base `main` of
 # Danathar/openaudible-autoupdate. The result goes to the run summary.
 #
 # Failure model: a violation fails the run (`--strict`). It does not open an
