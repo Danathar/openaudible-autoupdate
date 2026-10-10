@@ -87,6 +87,131 @@ assert_tmp_clean() {
   [[ "$(calls)" != *"dnf "* ]]
 }
 
+@test "manifest that is not JSON exits 1 before any download" {
+  publish_release 2.0.0
+  printf '<html><body>maintenance</body></html>\n' >"$SERVER/swt_version.json"
+  run_script
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid version manifest from http://stub.test/swt_version.json (not a JSON object)."* ]]
+  [[ "$(calls)" != *"/dl/"* ]]
+  [[ "$(calls)" != *"dnf "* ]]
+  assert_tmp_clean
+}
+
+@test "manifest that is JSON but not an object exits 1 before any download" {
+  publish_release 2.0.0
+  printf '[]\n' >"$SERVER/swt_version.json"
+  run_script
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid version manifest from"* ]]
+  [[ "$(calls)" != *"/dl/"* ]]
+}
+
+@test "empty file name for the platform exits 1 and names the key" {
+  publish_release 2.0.0
+  set_manifest_field '.platforms.linux_x86_64_rpm.file = ""'
+  run_script
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Platform key 'linux_x86_64_rpm' not found in version manifest."* ]]
+  [[ "$(calls)" != *"/dl/"* ]]
+  [[ "$(calls)" != *"dnf "* ]]
+}
+
+# assert_rejected_before_download MESSAGE: the run failed on manifest
+# validation, so nothing was downloaded, verified or installed. Only curl
+# calls are checked for /dl/: the logged message may echo a bad download_dir.
+assert_rejected_before_download() {
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$1"* ]]
+  [[ "$output" != *"Checksum verified."* ]]
+  if calls | grep -q '^curl .*/dl/'; then return 1; fi
+  [[ "$(calls)" == *"curl "*"swt_version.json"* ]]
+  [[ "$(calls)" != *"sudo "* ]]
+  [[ "$(calls)" != *"dnf "* ]]
+  assert_tmp_clean
+}
+
+@test "manifest without a sha256 for the platform refuses to install" {
+  # A missing checksum must never be read as "nothing to check".
+  publish_release 2.0.0
+  set_manifest_field 'del(.platforms.linux_x86_64_rpm.sha256)'
+  run_script
+  assert_rejected_before_download "Invalid version manifest: sha256 '' is not 64 lowercase hex characters."
+}
+
+@test "manifest with an empty sha256 for the platform refuses to install" {
+  publish_release 2.0.0
+  set_manifest_field '.platforms.linux_x86_64_rpm.sha256 = ""'
+  run_script
+  assert_rejected_before_download "Invalid version manifest: sha256 '' is not"
+}
+
+@test "manifest with a null sha256 for the platform refuses to install" {
+  publish_release 2.0.0
+  set_manifest_field '.platforms.linux_x86_64_rpm.sha256 = null'
+  run_script
+  assert_rejected_before_download "Invalid version manifest: sha256 '' is not"
+}
+
+@test "manifest with a malformed sha256 refuses to install (short, uppercase, non-hex, number)" {
+  local bad
+  for bad in '"abc123"' '"ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789"' \
+    '"zz00000000000000000000000000000000000000000000000000000000000000"' '12345'; do
+    publish_release 2.0.0
+    : >"$CALLS"
+    set_manifest_field ".platforms.linux_x86_64_rpm.sha256 = $bad"
+    run_script
+    assert_rejected_before_download "Invalid version manifest: sha256"
+  done
+}
+
+@test "manifest without a version refuses to download (missing, null, empty, number)" {
+  local filter
+  for filter in 'del(.version)' '.version = null' '.version = ""' '.version = 2'; do
+    publish_release 2.0.0
+    : >"$CALLS"
+    set_manifest_field "$filter"
+    run_script
+    assert_rejected_before_download "Invalid version manifest: version '' is missing or malformed."
+  done
+}
+
+@test "manifest version with characters outside an rpm version refuses to download" {
+  publish_release 2.0.0
+  set_manifest_field '.version = "2.0.0/../x"'
+  run_script
+  assert_rejected_before_download "Invalid version manifest: version '2.0.0/../x' is missing or malformed."
+}
+
+@test "manifest file that is not a plain .rpm name refuses to download" {
+  local bad
+  for bad in '../x.rpm' 'sub/x.rpm' '.hidden.rpm' 'OpenAudible-2.0.0.sh' 'x.rpm.sh' 'x .rpm'; do
+    publish_release 2.0.0
+    : >"$CALLS"
+    set_manifest_field ".platforms.linux_x86_64_rpm.file = \"$bad\""
+    run_script
+    assert_rejected_before_download "Invalid version manifest: file '$bad' is not a plain .rpm file name."
+  done
+}
+
+@test "manifest download_dir that is not https refuses to download" {
+  local bad
+  for bad in 'http://stub.test/dl/' 'ftp://stub.test/dl/' 'file:///etc/' 'https://' 'stub.test/dl/' 'HTTPS://stub.test/dl/'; do
+    publish_release 2.0.0
+    : >"$CALLS"
+    set_manifest_field ".download_dir = \"$bad\""
+    run_script
+    assert_rejected_before_download "Invalid version manifest: download_dir '$bad' is not an https:// URL."
+  done
+}
+
+@test "manifest without download_dir refuses to download" {
+  publish_release 2.0.0
+  set_manifest_field 'del(.download_dir)'
+  run_script
+  assert_rejected_before_download "Invalid version manifest: download_dir '' is not an https:// URL."
+}
+
 # --- up to date -------------------------------------------------------------
 
 @test "up to date exits 0 with no download or install" {
@@ -122,11 +247,29 @@ assert_tmp_clean() {
   [[ "$output" == *"Update available: 1.0.0 -> 2.0.0. Downloading OpenAudible-2.0.0.x86_64.rpm..."* ]]
   [[ "$output" == *"Checksum verified."* ]]
   [[ "$output" == *"OpenAudible upgraded: 1.0.0 -> 2.0.0."* ]]
-  [[ "$(calls)" == *"curl http://stub.test/dl/OpenAudible-2.0.0.x86_64.rpm"* ]]
+  [[ "$(calls)" == *"curl https://stub.test/dl/OpenAudible-2.0.0.x86_64.rpm"* ]]
   run grep -E '^sudo dnf install -y .*/OpenAudible-2\.0\.0\.x86_64\.rpm$' "$CALLS"
   [ "$status" -eq 0 ]
   # The file dnf received existed and held the downloaded bytes.
   [[ "$(calls)" == *"dnf-rpm-present OpenAudible-2.0.0.x86_64.rpm rpm-payload-2.0.0"* ]]
+}
+
+@test "rpm download is restricted to https, including redirects" {
+  publish_release 2.0.0
+  run_script
+  [ "$status" -eq 0 ]
+  [[ "$(calls)" == *"curl-protos --proto =https --proto-redir =https https://stub.test/dl/OpenAudible-2.0.0.x86_64.rpm"* ]]
+}
+
+@test "rpm header is checked after the checksum and before sudo dnf" {
+  publish_release 2.0.0
+  run_script
+  [ "$status" -eq 0 ]
+  local qp install
+  qp=$(grep -n '^rpm -qp --qf %{NAME} %{VERSION} .*/OpenAudible-2\.0\.0\.x86_64\.rpm$' "$CALLS" | cut -d: -f1)
+  install=$(grep -n '^sudo dnf install -y ' "$CALLS" | cut -d: -f1)
+  [ -n "$qp" ] && [ -n "$install" ]
+  [ "$qp" -lt "$install" ]
 }
 
 @test "update sends a desktop notification when notify-send exists" {
@@ -169,7 +312,7 @@ assert_tmp_clean() {
   rm "$SERVER/$RPM_NAME"
   run_script
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Download failed for http://stub.test/dl/OpenAudible-2.0.0.x86_64.rpm"* ]]
+  [[ "$output" == *"Download failed for https://stub.test/dl/OpenAudible-2.0.0.x86_64.rpm"* ]]
   [[ "$(calls)" != *"dnf "* ]]
 }
 
@@ -182,6 +325,52 @@ assert_tmp_clean() {
   [[ "$output" == *"Aborting."* ]]
   [[ "$(calls)" != *"dnf "* ]]
   [[ "$(calls)" != *"sudo "* ]]
+}
+
+# assert_not_installed_after_verify MESSAGE: the checksum passed, but the run
+# stopped before sudo/dnf with MESSAGE.
+assert_not_installed_after_verify() {
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Checksum verified."* ]]
+  [[ "$output" == *"$1"* ]]
+  [[ "$output" != *"upgraded"* ]]
+  [[ "$(calls)" != *"sudo "* ]]
+  [[ "$(calls)" != *"dnf "* ]]
+  [[ "$(calls)" != *"notify-send"* ]]
+  assert_tmp_clean
+}
+
+@test "rpm whose package name is not PKG_NAME is not installed" {
+  publish_release 2.0.0
+  printf 'SomethingElse 2.0.0' >"$SERVER/$RPM_NAME.header"
+  run_script
+  assert_not_installed_after_verify "Package identity mismatch! expected='OpenAudible 2.0.0' actual='SomethingElse 2.0.0'. Aborting."
+}
+
+@test "rpm whose version differs from the manifest version is not installed" {
+  publish_release 2.0.0
+  printf 'OpenAudible 1.9.9' >"$SERVER/$RPM_NAME.header"
+  run_script
+  assert_not_installed_after_verify "Package identity mismatch! expected='OpenAudible 2.0.0' actual='OpenAudible 1.9.9'. Aborting."
+}
+
+@test "download that rpm cannot read as a package is not installed" {
+  publish_release 2.0.0
+  rm "$SERVER/$RPM_NAME.header"
+  run_script
+  assert_not_installed_after_verify "Package identity mismatch! expected='OpenAudible 2.0.0' actual=''. Aborting."
+}
+
+@test "dnf exiting 0 without changing the installed version exits 1 and does not notify" {
+  export STUB_DNF_NOOP=1
+  publish_release 2.0.0
+  run_script
+  [ "$status" -eq 1 ]
+  [[ "$(calls)" == *"sudo dnf install -y "* ]]
+  [[ "$output" == *"dnf exited 0 but OpenAudible is at '1.0.0', not 2.0.0. Install did not take effect."* ]]
+  [[ "$output" != *"upgraded"* ]]
+  [[ "$(calls)" != *"notify-send"* ]]
+  assert_tmp_clean
 }
 
 @test "dnf failure exits 1, reports it and does not notify" {

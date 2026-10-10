@@ -109,6 +109,14 @@ Recorded here, not fixed: this change set deliberately does not touch the
 script's behavior. Line numbers are for `openaudible-autoupdate.sh` at
 `d769ba1`.
 
+Update (issue #61): findings 1 and 3 are now handled in the script. The
+manifest must be a JSON object; `file` must be a plain `.rpm` name;
+`download_dir` must be `https://` and the download uses
+`--proto =https --proto-redir =https`; `version` and `sha256` must be
+well-formed. In addition, the rpm header's name and version are checked
+before install, and the installed version is re-read after `dnf`. Findings 2
+and 4 remain open for the owner.
+
 1. **`file` is not validated; `..` escapes the work directory.** Line 55 builds
    `"$WORKDIR/$file_name"` from the manifest value and line 56 downloads
    straight to it with no `--create-dirs`. A `file` such as `../x.rpm` makes
