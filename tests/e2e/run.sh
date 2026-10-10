@@ -26,8 +26,10 @@ if [ -z "$engine" ]; then
   exit 2
 fi
 
-# :Z relabels the mount for SELinux hosts (podman); docker ignores it harmlessly.
+# label=disable lets the container read the mount on SELinux hosts without
+# relabelling the repository (:z/:Z would change its file labels recursively).
 exec "$engine" run --rm \
-  -v "$repo_root:/src:ro,Z" \
+  --security-opt label=disable \
+  -v "$repo_root:/src:ro" \
   "$E2E_IMAGE" \
   bash /src/tests/e2e/in-container.sh

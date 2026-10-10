@@ -35,6 +35,14 @@ assert_tmp_clean() {
   [[ "$output" == *"Missing required dependency: sha256sum"* ]]
 }
 
+@test "missing awk exits 1 and names it before any network access" {
+  rm "$REALBIN/awk"
+  run_script
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Missing required dependency: awk"* ]]
+  [[ "$(calls)" != *"curl "* ]]
+}
+
 @test "missing dependency is reported to the journal when systemd-cat exists" {
   stub_off dnf
   run_script

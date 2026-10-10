@@ -138,7 +138,7 @@ tests/e2e/run.sh
 
 # Coverage (line coverage of the script under the unit tests, via kcov, which
 # is packaged for Fedora). Floor is in .coverage-thresholds.json.
-podman run --rm -v "$PWD:/src:ro,Z" registry.fedoraproject.org/fedora:latest bash -c '
+podman run --rm --security-opt label=disable -v "$PWD:/src:ro" registry.fedoraproject.org/fedora:latest bash -c '
   dnf install -y -q kcov bats jq gawk git nodejs &&
   cp -r /src /work && cd /work &&
   kcov --include-pattern=openaudible-autoupdate.sh coverage bats tests/unit &&

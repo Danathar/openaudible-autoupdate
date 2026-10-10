@@ -22,7 +22,7 @@ log() {
   fi
 }
 
-for dep in curl jq rpm sudo dnf sha256sum; do
+for dep in curl jq rpm sudo dnf sha256sum awk; do
   command -v "$dep" >/dev/null 2>&1 || { log "Missing required dependency: $dep"; exit 1; }
 done
 
