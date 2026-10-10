@@ -123,14 +123,13 @@ reading and settled by the owner.
 
 No agent merges its own pull request unless the owner has set that up.
 
-- **Required checks.** Ruleset `protect main` (id 24826574, active when read on
-  2026-10-10) requires `Lint (shellcheck)`, `Unit tests (ubuntu bash)`,
+- **Required checks.** Ruleset `protect main` (id 24826574, active) requires six
+  checks: `Lint (shellcheck)`, `Unit tests (ubuntu bash)`,
   `Unit tests (fedora container)` and `E2E (fedora container)` (the jobs in
-  [`ci.yml`](../.github/workflows/ci.yml)) and `Coverage gate`
-  ([`coverage-gate.yml`](../.github/workflows/coverage-gate.yml)), with branches
-  required to be up to date. Once the governance pull request (#55) has merged,
-  `policy-check` ([`policy-check.yml`](../.github/workflows/policy-check.yml))
-  is added as a sixth. All run on every pull request; a red one blocks the
+  [`ci.yml`](../.github/workflows/ci.yml)), `Coverage gate`
+  ([`coverage-gate.yml`](../.github/workflows/coverage-gate.yml)) and
+  `policy-check` ([`policy-check.yml`](../.github/workflows/policy-check.yml)),
+  with branches required to be up to date. All run on every pull request; a red one blocks the
   merge. The ruleset is recorded in `.github/rulesets/main.json` and explained in
   [`branch-protection.md`](branch-protection.md) (issue #42, PR #58); if either
   disagrees with this paragraph, they win. Check what is live with
