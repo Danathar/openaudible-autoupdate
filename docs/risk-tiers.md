@@ -21,7 +21,7 @@ directory level.
 | Tier | Name | Covers | Required commands | Review |
 | ---- | ---- | ------ | ----------------- | ------ |
 | 1 | critical | `.github/workflows/**`, `.github/CODEOWNERS`, `.github/rulesets/**`, `.claude/settings.json`, `.claude/hooks/**`, `policies/**`, `scripts/check-policies.mjs`, `risk-config.json`, `LICENSE`, `AGENTS.md` | `shellcheck openaudible-autoupdate.sh`, `bats tests/unit`, `tests/e2e/run.sh`, `node scripts/check-policies.mjs`, `node --test scripts/tests/*.test.mjs` | `owner` |
-| 2 | high | `openaudible-autoupdate.sh`, `systemd/**`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/**`, `.github/prompts/**`, `.claude/skills/**`, `.claude/memory/**` | `shellcheck openaudible-autoupdate.sh`, `bats tests/unit`, `node scripts/check-policies.mjs` | `owner` |
+| 2 | high | `openaudible-autoupdate.sh`, `systemd/**`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/**`, `.github/prompts/**`, `.claude/skills/**`, `.claude/memory/**`, `docs/risk-tiers.md`, `docs/agent-boundaries.md`, `docs/security/**` | `shellcheck openaudible-autoupdate.sh`, `bats tests/unit`, `node scripts/check-policies.mjs` | `owner` |
 | 3 | medium | `tests/**`, `scripts/**`, `.shellcheckrc`, `.coverage-thresholds.json` | `bats tests/unit`, `node --test scripts/tests/*.test.mjs` | `ci` |
 | 4 | low | `docs/**`, `*.md`, `.editorconfig`, `.gitignore` | none | `ci` |
 
@@ -65,7 +65,8 @@ make it a blocking requirement).
 
 1. List every path the change touches.
 2. Take the **highest-risk** (lowest-numbered) tier any path matches. A path
-   that matches several rows, such as `AGENTS.md` (Tier 1) and `*.md` (Tier 4), takes the lowest number.
+   that matches several rows, such as `docs/security/SECURITY-AI.md` (Tier 2)
+   and `docs/**` (Tier 4), takes the lowest number.
 3. A path no row lists is Tier 3.
 4. Raise the tier, never lower it, when the change is riskier than its path
    says: the install path rule above; a "docs" change that edits the example
@@ -100,11 +101,10 @@ path table assigns to each path. It does not apply the install-path rule.
   `.cursor/rules/**`, `.github/prompts/**`, `.claude/skills/**`,
   `.claude/memory/**`). They tell
   agents what to do; a loosened one loosens the agent.
-- **`docs/**` (Tier 4), including `docs/security/**`, `docs/agent-boundaries.md`
-  and this file.** Documentation is Tier 4 by path. These three describe the
-  boundary, so CODEOWNERS still requests the owner's review on them and a
-  change that loosens a rule they state is raised to the tier of the rule
-  (step 4 above). Edit them together with the policy files they describe.
+- **`docs/security/**`, `docs/agent-boundaries.md`, this file.** The written
+  boundary agents are judged by. They are Tier 2 so an agent cannot change
+  them under the `ci` gate, even though ordinary `docs/**` is Tier 4. Edit
+  them together with the policy files they describe.
 - **`tests/**`, `scripts/**`.** They can hide a regression but do not ship to the
   host. `scripts/check-policies.mjs` is the exception and is Tier 1.
 

@@ -118,7 +118,7 @@ test('real repository trees: classify picks the most dangerous tier', () => {
     assert.equal(classify(config, 'AGENTS.md').tier, 1);
     assert.equal(classify(config, 'openaudible-autoupdate.sh').tier, 2);
     assert.equal(classify(config, 'systemd/openaudible-autoupdate.service').tier, 2);
-    assert.equal(classify(config, 'docs/security/SECURITY-AI.md').tier, 4);
+    assert.equal(classify(config, 'docs/security/SECURITY-AI.md').tier, 2);
     assert.equal(classify(config, '.claude/memory/README.md').tier, 2);
     assert.equal(classify(config, 'README.md').tier, 4);
     assert.equal(classify(config, 'docs/quality.md').tier, 4);

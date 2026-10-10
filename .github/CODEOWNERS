@@ -24,8 +24,6 @@
 /.github/prompts/                       @Danathar
 /.claude/skills/                        @Danathar
 /.claude/memory/                        @Danathar
-
-# Tier 4 by path, but they state the agent boundary: review is requested.
 /docs/risk-tiers.md                     @Danathar
 /docs/agent-boundaries.md               @Danathar
 /docs/security/                         @Danathar
