@@ -21,13 +21,13 @@ directory level.
 | Tier | Name | Covers | Required commands | Review |
 | ---- | ---- | ------ | ----------------- | ------ |
 | 1 | critical | `.github/workflows/**`, `.github/CODEOWNERS`, `.github/rulesets/**`, `.claude/settings.json`, `.claude/hooks/**`, `policies/**`, `scripts/check-policies.mjs`, `risk-config.json`, `LICENSE`, `AGENTS.md` | `shellcheck openaudible-autoupdate.sh`, `bats tests/unit`, `tests/e2e/run.sh`, `node scripts/check-policies.mjs`, `node --test scripts/tests/*.test.mjs` | `owner` |
-| 2 | high | `openaudible-autoupdate.sh`, `systemd/**`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/**`, `.github/prompts/**`, `.claude/skills/**`, `docs/risk-tiers.md`, `docs/agent-boundaries.md`, `docs/security/**` | `shellcheck openaudible-autoupdate.sh`, `bats tests/unit`, `node scripts/check-policies.mjs` | `owner` |
+| 2 | high | `openaudible-autoupdate.sh`, `systemd/**`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/**`, `.github/prompts/**`, `.claude/skills/**`, `.claude/memory/**` | `shellcheck openaudible-autoupdate.sh`, `bats tests/unit`, `node scripts/check-policies.mjs` | `owner` |
 | 3 | medium | `tests/**`, `scripts/**`, `.shellcheckrc`, `.coverage-thresholds.json` | `bats tests/unit`, `node --test scripts/tests/*.test.mjs` | `ci` |
 | 4 | low | `docs/**`, `*.md`, `.editorconfig`, `.gitignore` | none | `ci` |
 
 Review values: `owner` means the repository owner (Danathar) reads the diff and
 merges it, and a green CI run alone is not enough. `ci` means the required CI
-checks (the jobs in `.github/workflows/ci.yml`: `Lint (shellcheck)`, `Unit tests (ubuntu bash)`, `Unit tests (fedora container)`, `E2E (fedora container)`; plus `Coverage gate`) must pass, and an agent may
+checks must pass: the four jobs in `.github/workflows/ci.yml` (`Lint (shellcheck)`, `Unit tests (ubuntu bash)`, `Unit tests (fedora container)`, `E2E (fedora container)`), `Coverage gate` and `policy-check`, and an agent may
 open and, under the Hive merge strategy, queue the pull request.
 
 ## The install path is Tier 1
@@ -57,15 +57,15 @@ install path".
 The rest of the script (logging, notifications, the "not installed" early
 exit) and `systemd/**` (what runs the script and when) are Tier 2. Path
 matching is whole-file, so this split is a reviewer rule, not something the
-checker or CODEOWNERS can see: every change to the script gets owner review
-regardless.
+checker or CODEOWNERS can see. The owner is asked to review every change to
+the script regardless (CODEOWNERS requests the review; the ruleset does not
+make it a blocking requirement).
 
 ## How to apply it
 
 1. List every path the change touches.
 2. Take the **highest-risk** (lowest-numbered) tier any path matches. A path
-   that matches several rows, such as `docs/security/SECURITY-AI.md` (Tier 2)
-   and `docs/**` (Tier 4), takes the lowest number.
+   that matches several rows, such as `AGENTS.md` (Tier 1) and `*.md` (Tier 4), takes the lowest number.
 3. A path no row lists is Tier 3.
 4. Raise the tier, never lower it, when the change is riskier than its path
    says: the install path rule above; a "docs" change that edits the example
@@ -85,8 +85,9 @@ path table assigns to each path. It does not apply the install-path rule.
   runs with repository tokens, what blocks a merge, and who must approve. A
   workflow that gets write scope or an interpolated issue title is a way into
   the repository.
-- **`.claude/settings.json`, `.claude/hooks/**`.** The permission table and the
-  Bash guard that stop an agent from running the updater for real or pushing to
+- **`.claude/settings.json`, `.claude/hooks/**`.** The agent permission table and
+  Bash guard (added by the Claude-learning change set, not by this one): they
+  are meant to stop an agent from running the updater for real or pushing to
   the wrong repository.
 - **`policies/**`, `scripts/check-policies.mjs`, `risk-config.json`, `AGENTS.md`.**
   The rules that bound agents and the checker that enforces them. They are
@@ -96,10 +97,14 @@ path table assigns to each path. It does not apply the install-path rule.
 - **`openaudible-autoupdate.sh`, `systemd/**`.** The code that runs as the user
   on a timer and calls `sudo dnf install`. See the install path above.
 - **Agent direction files** (`CLAUDE.md`, `.github/copilot-instructions.md`,
-  `.cursor/rules/**`, `.github/prompts/**`, `.claude/skills/**`). They tell
+  `.cursor/rules/**`, `.github/prompts/**`, `.claude/skills/**`,
+  `.claude/memory/**`). They tell
   agents what to do; a loosened one loosens the agent.
-- **`docs/security/**`, `docs/agent-boundaries.md`, this file.** The written
-  boundary. Edit them together with the policy files they describe.
+- **`docs/**` (Tier 4), including `docs/security/**`, `docs/agent-boundaries.md`
+  and this file.** Documentation is Tier 4 by path. These three describe the
+  boundary, so CODEOWNERS still requests the owner's review on them and a
+  change that loosens a rule they state is raised to the tier of the rule
+  (step 4 above). Edit them together with the policy files they describe.
 - **`tests/**`, `scripts/**`.** They can hide a regression but do not ship to the
   host. `scripts/check-policies.mjs` is the exception and is Tier 1.
 
@@ -114,5 +119,5 @@ path table assigns to each path. It does not apply the install-path rule.
   affected, even when the answer is "unchanged". Never run the updater for real
   to check; use the stubbed tests.
 
-See also [`.github/CODEOWNERS`](../.github/CODEOWNERS) and the
-[review rubric](review-rubric.md).
+See also [`.github/CODEOWNERS`](../.github/CODEOWNERS) and, once it lands,
+the review rubric in `docs/review-rubric.md`.

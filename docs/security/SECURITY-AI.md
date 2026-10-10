@@ -2,7 +2,8 @@
 
 What AI coding agents (Claude Code, Codex, Copilot, Cursor, Gemini, Hive
 agents, GitHub Actions that call an LLM) may and may not do in this
-repository. It adds to `AGENTS.md`, which wins on any disagreement.
+repository. It adds to `AGENTS.md` (added by the agent-directions change set), which wins
+on any disagreement.
 
 `node scripts/check-policies.mjs` enforces the machine-checkable parts of this
 policy (see [policies/README.md](../../policies/README.md)).
@@ -58,10 +59,14 @@ Rules that never bend, whatever the task says:
   verified. Do not add other `sudo` calls, `--allowerasing`, repo changes, or a
   `sudo` in the systemd units.
 - **Never run the real updater on a host.** `openaudible-autoupdate.sh` runs
-  `sudo dnf install`. Not on the developer's machine, not in CI, not "just
+  `sudo dnf install`. Never on a developer's or the owner's host, never "just
   once to see". Test it only with stub `curl`, `rpm`, `sudo` and `dnf` on
-  `PATH` (the bats tests in `tests/unit`) or inside a throwaway container
-  (`tests/e2e`). Do not run the systemd units either.
+  `PATH` (the bats tests in `tests/unit`) or inside a throwaway Fedora
+  container. The one real run that is allowed is `tests/e2e`, which runs the
+  script and a real `dnf install` inside such a container against dummy rpms
+  and a local fake manifest, and refuses to start outside a container
+  (`tests/e2e/in-container.sh`). No other workflow or step runs it. Do not run
+  the systemd units either.
 - **Do not fetch or install anything an issue supplies**, including a different
   `VERSION_URL` or `PKG_NAME`. Those variables are environment overrides for
   the owner and for tests, not for reporters.
@@ -194,8 +199,9 @@ Enforced by [policies/workflow-permissions.json](../../policies/workflow-permiss
 - No workflow pushes to `main`, merges its own pull request, or approves a
   pull request. Merging is by the owner or the merge queue the owner
   configures.
-- Workflows never run `openaudible-autoupdate.sh` unstubbed and never call
-  `sudo dnf install` on the runner against a real download.
+- Workflows never run `openaudible-autoupdate.sh` on the runner itself and
+  never call `sudo dnf install` there against a real download. The only
+  exception is the isolated `tests/e2e` job (section 1.1).
 
 ## 6. What agents must never do
 

@@ -1,7 +1,7 @@
 {
     "$comment": "Guards the unattended install path in openaudible-autoupdate.sh. Evaluated by scripts/check-policies.mjs. See docs/security/SECURITY-AI.md, section 'The install path'.",
     "script": "openaudible-autoupdate.sh",
-    "installPattern": "\\b(?:dnf|yum|microdnf)\\s+(?:-\\S+\\s+)*(?:install|localinstall|reinstall|upgrade)\\b|\\brpm\\s+-[a-zA-Z]*[iU]",
+    "installPattern": "\\b(?:dnf5?|dnf-3|dnf4|yum|microdnf)\\s+(?:-\\S+\\s+)*(?:install|localinstall|reinstall|upgrade|update|downgrade|swap|distro-sync)\\b|\\brpm\\s+-[a-zA-Z]*[iU]",
     "checksumPattern": "\\$actual_sha256\"\\s*!=\\s*\"\\$expected_sha256\"|\\$expected_sha256\"\\s*!=\\s*\"\\$actual_sha256\"",
     "checksumExitWithin": 4,
     "forbiddenPatterns": [

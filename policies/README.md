@@ -90,7 +90,9 @@ refactor that moves the install above the checksum or adds `--nogpgcheck`. It
 is not a shell or YAML parser and does not defend against deliberately
 obfuscated commands (variables built at runtime, `eval`, generated scripts,
 aliases, an option assembled in a variable). The hard boundaries are the
-repository-scoped `GITHUB_TOKEN`, code-owner review and the owner's merge.
+repository-scoped `GITHUB_TOKEN`, the required status checks and the owner's
+merge. CODEOWNERS only requests the owner's review; the ruleset does not
+require it.
 
 ## Risk tiers
 

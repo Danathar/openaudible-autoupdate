@@ -37,9 +37,7 @@
                 ".cursor/rules/**",
                 ".github/prompts/**",
                 ".claude/skills/**",
-                "docs/risk-tiers.md",
-                "docs/agent-boundaries.md",
-                "docs/security/**"
+                ".claude/memory/**"
             ],
             "required_commands": [
                 "shellcheck openaudible-autoupdate.sh",

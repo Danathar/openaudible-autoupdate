@@ -165,7 +165,8 @@ export function checkRepoTarget(root, policy, files) {
 
 /**
  * The unattended install path in the updater script. Line-based on purpose:
- * comment lines are ignored, and every install command must come after a
+ * comment lines and quoted strings are ignored when looking for install
+ * commands (not for forbidden options), and every install command must come after a
  * sha256 comparison whose mismatch branch exits within a few lines.
  * A missing script is a violation, because the policy would otherwise pass
  * vacuously.
@@ -190,7 +191,11 @@ export function checkInstallSafety(root, policy) {
     });
 
     const sumAt = code.findIndex((l) => sumRe.test(l));
-    const installs = code.flatMap((l, i) => (installRe.test(l) ? [i] : []));
+    // Quoted text is log output or an argument, not a command: strip it so
+    // `log "dnf install failed."` is not an install and a real install
+    // command is judged by its unquoted words.
+    const unquoted = (l) => l.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""');
+    const installs = code.flatMap((l, i) => (installRe.test(unquoted(l)) ? [i] : []));
     if (sumAt === -1) {
         v.push(`${rel}: no sha256 comparison of the downloaded file against the manifest value`);
     } else {

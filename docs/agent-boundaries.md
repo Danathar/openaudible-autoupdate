@@ -62,6 +62,8 @@ enough and the owner reads the diff:
   Bash guard)
 - `policies/`, `scripts/check-policies.mjs`, `risk-config.json`,
   `.github/CODEOWNERS`, `.github/workflows/`
+- `docs/security/`, `docs/risk-tiers.md`, this file (Tier 4 by path; the owner's
+  review is requested through CODEOWNERS)
 
 `policies/repo-target.json` lists the direction files that must carry
 `--repo Danathar/openaudible-autoupdate`. Add a new one there when you add a

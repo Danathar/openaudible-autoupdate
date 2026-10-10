@@ -118,7 +118,8 @@ test('real repository trees: classify picks the most dangerous tier', () => {
     assert.equal(classify(config, 'AGENTS.md').tier, 1);
     assert.equal(classify(config, 'openaudible-autoupdate.sh').tier, 2);
     assert.equal(classify(config, 'systemd/openaudible-autoupdate.service').tier, 2);
-    assert.equal(classify(config, 'docs/security/SECURITY-AI.md').tier, 2);
+    assert.equal(classify(config, 'docs/security/SECURITY-AI.md').tier, 4);
+    assert.equal(classify(config, '.claude/memory/README.md').tier, 2);
     assert.equal(classify(config, 'README.md').tier, 4);
     assert.equal(classify(config, 'docs/quality.md').tier, 4);
     assert.equal(classify(config, 'tests/unit/x.bats').tier, 3);
@@ -734,4 +735,37 @@ test('repo-target: write naming both repos still fails', () => {
 
 test('real repository: all policies pass on this tree', () => {
     assert.deepEqual(checkAll(repoRoot), []);
+});
+
+// ---- install-safety: command position, dnf5
+
+test('install-safety: a quoted log message is not an install command', () => {
+    const v = withScript(
+        GOOD_SCRIPT.replace('sudo dnf install -y "$rpm_path"', 'log "dnf install failed."'),
+    );
+    assert.equal(v.length, 1);
+    assert.match(v[0], /no package install command found/);
+});
+
+test('install-safety: dnf5 and dnf-3 installs are install commands', () => {
+    for (const bin of ['dnf5', 'dnf-3', 'dnf4']) {
+        const early = withScript(`sudo ${bin} install -y "$rpm_path"\n` + GOOD_SCRIPT);
+        assert.match(early.join('\n'), /:1: install command appears before/, bin);
+        const late = withScript(GOOD_SCRIPT.replace('dnf install', `${bin} install`));
+        assert.deepEqual(late, [], bin);
+    }
+});
+
+test('install-safety: log text after a real install does not hide a missing checksum', () => {
+    const body = GOOD_SCRIPT
+        .replace(/if \[ "\$actual_sha256"[^]*?\nfi\n/, '')
+        .replace('sudo dnf install', 'sudo dnf5 install') + 'log "dnf install failed."\n';
+    const v = withScript(body).join('\n');
+    assert.match(v, /no sha256 comparison/);
+    assert.match(v, /install command appears before/);
+});
+
+test('install-safety: gpgcheck bypass inside quotes is still rejected', () => {
+    const v = withScript(GOOD_SCRIPT + 'sudo dnf5 install -y --setopt="localpkg_gpgcheck=0" x\n');
+    assert.ok(v.some((x) => /forbidden option/.test(x)), v.join('|'));
 });
