@@ -60,6 +60,10 @@
           {
             "context": "Coverage gate",
             "integration_id": 15368
+          },
+          {
+            "context": "policy-check",
+            "integration_id": 15368
           }
         ]
       }
