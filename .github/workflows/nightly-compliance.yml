@@ -1,0 +1,153 @@
+name: Nightly compliance
+
+# Checks that drift slowly or depend on the outside world, run every night
+# against main: the bats unit tests, shellcheck, the container end-to-end test,
+# and an upstream-contract check that the live OpenAudible manifest still has
+# the fields openaudible-autoupdate.sh reads. On a scheduled failure it opens or
+# updates ONE tracking issue in this repository (GH_REPO below) and never
+# closes it. Tunables (manifest URL, platform key): .github/auto-qa-tuning.json.
+#
+# The upstream-contract job only GETs the small JSON manifest. It never
+# downloads the rpm and never installs anything, and it never runs
+# openaudible-autoupdate.sh. The e2e job installs only dummy rpms, inside its
+# throwaway Fedora job container (see tests/e2e/in-container.sh).
+#
+# Why a separate upstream check: the script depends on a manifest it does not
+# control. If OpenAudible renames a field the script would log a failure on
+# every user's timer run, with nothing in this repository changing.
+#
+# The jobs below do not call ci.yml; they repeat its commands so that a flaky
+# or changed environment (new Fedora, new shellcheck) is noticed without a PR.
+
+on:
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-compliance
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit tests (fedora container)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: registry.fedoraproject.org/fedora:latest
+    steps:
+      - name: Install bats and tools
+        run: dnf install -y -q bats jq gawk git
+
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Run bats unit tests
+        run: bats --tap tests/unit
+
+  lint:
+    name: Lint (shellcheck)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: shellcheck (script, tests, e2e)
+        run: |
+          shellcheck --version
+          git ls-files -z '*.sh' '*.bash' '*.bats' | xargs -0 shellcheck
+
+  e2e:
+    name: E2E (fedora container)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: registry.fedoraproject.org/fedora:latest
+    steps:
+      - name: Install git
+        run: dnf install -y -q git
+
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Run end-to-end test
+        env:
+          SRC: ${{ github.workspace }}
+        run: bash tests/e2e/in-container.sh
+
+  upstream-contract:
+    name: Upstream manifest contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Fetch the manifest and check the fields the script reads
+        run: |
+          set -euo pipefail
+          url=$(jq -r '.nightly.manifest_url' .github/auto-qa-tuning.json)
+          key=$(jq -r '.nightly.platform_key' .github/auto-qa-tuning.json)
+          # The script's own defaults must agree with the recorded ones, or
+          # this check would test something the script does not use.
+          # shellcheck disable=SC2016 # the ${...} in the sed pattern is literal text
+          script_url=$(sed -n 's/^: "\${VERSION_URL:=\(.*\)}"$/\1/p' openaudible-autoupdate.sh)
+          # shellcheck disable=SC2016
+          script_key=$(sed -n 's/^: "\${PLATFORM_KEY:=\(.*\)}"$/\1/p' openaudible-autoupdate.sh)
+          if [ "$url" != "$script_url" ] || [ "$key" != "$script_key" ]; then
+            echo "::error::.github/auto-qa-tuning.json nightly.manifest_url/platform_key ($url, $key) differ from the defaults in openaudible-autoupdate.sh ($script_url, $script_key)"
+            exit 1
+          fi
+          curl -fsSL --retry 3 --retry-delay 5 --max-time 60 "$url" -o manifest.json
+          rc=0
+          check() { # <label> <jq filter> <regex the value must match>
+            local value
+            value=$(jq -r "$2 // empty" manifest.json 2>/dev/null || true)
+            if [[ "$value" =~ $3 ]]; then
+              echo "ok   $1 = $value"
+            else
+              echo "FAIL $1: got '${value}', expected to match $3"
+              rc=1
+            fi
+          }
+          check 'version' '.version | strings' '^[0-9]+(\.[0-9]+)*$'
+          check 'download_dir' '.download_dir | strings' '^https://.+/$'
+          check "platforms.$key.file" ".platforms[\"$key\"].file | strings" '\.rpm$'
+          check "platforms.$key.sha256" ".platforms[\"$key\"].sha256 | strings" '^[0-9a-f]{64}$'
+          exit "$rc"
+
+  report:
+    name: Open or update the tracking issue
+    needs: [unit, lint, e2e, upstream-contract]
+    if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TITLE: 'Nightly compliance failing'
+          UNIT: ${{ needs.unit.result }}
+          LINT: ${{ needs.lint.result }}
+          E2E: ${{ needs.e2e.result }}
+          UPSTREAM: ${{ needs.upstream-contract.result }}
+        run: |
+          set -euo pipefail
+          failed=""
+          for pair in "unit tests:$UNIT" "shellcheck:$LINT" "e2e:$E2E" "upstream manifest contract:$UPSTREAM"; do
+            [ "${pair#*:}" = "success" ] || failed="$failed ${pair%%:*} (${pair#*:});"
+          done
+          body=$(printf 'The nightly compliance run failed on %s.\n\nChecks that did not pass:%s\n\nRun: %s/%s/actions/runs/%s\n\nAn "upstream manifest contract" failure means OpenAudible changed %s; the updater script will fail on users'"'"' machines until it is adapted. This issue is not closed automatically; close it once the nightly is green.\n' \
+            "$(date -u +%Y-%m-%d)" "$failed" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" 'the manifest')
+          existing=$(gh issue list --repo "$GH_REPO" --state open --limit 1000 --json number,title,author \
+            --jq '[.[] | select(.title == env.TITLE and (.author.login == "app/github-actions" or .author.login == "github-actions[bot]" or .author.login == "github-actions"))][0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment --repo "$GH_REPO" "$existing" --body "$body"
+          else
+            gh issue create --repo "$GH_REPO" --title "$TITLE" --body "$body"
+          fi
