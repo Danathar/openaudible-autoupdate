@@ -73,7 +73,7 @@ permanently, delete the file in a pull request.
 | `ci.yml` | the test jobs (shellcheck, bats unit tests with stubbed commands, container end-to-end); the checks the ruleset requires | `gh workflow disable ci.yml --repo Danathar/openaudible-autoupdate` |
 | `coverage-gate.yml` | fails a PR whose coverage falls below the floor in `.coverage-thresholds.json` | `gh workflow disable coverage-gate.yml --repo Danathar/openaudible-autoupdate` |
 | `auto-qa.yml` | runs `scripts/auto-qa-tuner.mjs` against `.github/auto-qa-tuning.json` to report whether a floor should move | `gh workflow disable auto-qa.yml --repo Danathar/openaudible-autoupdate` |
-| `nightly-compliance.yml` | the scheduled checks, including the manifest-contract check against the live OpenAudible manifest | `gh workflow disable nightly-compliance.yml --repo Danathar/openaudible-autoupdate` |
+| `nightly-compliance.yml` | the scheduled compliance checks (#26); the manifest-contract check against the live OpenAudible manifest is intended to live here, so confirm it in the file header | `gh workflow disable nightly-compliance.yml --repo Danathar/openaudible-autoupdate` |
 | `pr-metrics.yml` | runs `scripts/pr-metrics.mjs` for [`metrics.md`](metrics.md) | `gh workflow disable pr-metrics.yml --repo Danathar/openaudible-autoupdate` |
 | `agent-audit.yml` | reads back which agent PRs have `Closes #N`, a signature line and a human merger (`scripts/ai-audit-report.mjs`) | `gh workflow disable agent-audit.yml --repo Danathar/openaudible-autoupdate` |
 | `auto-issues.yml` | opens or comments on a tracking issue when a monitored workflow fails | `gh workflow disable auto-issues.yml --repo Danathar/openaudible-autoupdate` |
@@ -123,7 +123,7 @@ gh run view "$RUN" --repo Danathar/openaudible-autoupdate --log-failed
 
 ## OpenAudible changed its manifest
 
-Signal: the manifest-contract check in `nightly-compliance.yml` fails. The script
+Signal: the nightly manifest-contract check (intended for `nightly-compliance.yml`; confirm it is there) fails, or a user reports the script failing. The script
 depends on `.version`, `.download_dir` and `.platforms[$PLATFORM_KEY].file` /
 `.sha256` of `https://openaudible.org/downloads/swt_version.json`
 (`openaudible-autoupdate.sh:38-41`). OpenAudible, not this repository, controls
@@ -179,14 +179,20 @@ the `dnf` commands below run inside the container.
 **Roll OpenAudible back.** The script keeps no copy of the rpm: it downloads into
 a temporary directory that is removed when it exits
 (`openaudible-autoupdate.sh:15-16`). Roll back from dnf's record or from the
-vendor's release:
+vendor's release (these commands were not run for this page):
 
 ```bash
 sudo dnf history list                       # find the transaction that upgraded OpenAudible
-sudo dnf history undo <id>                  # reverses it, if dnf still has the old package
-# or install the older rpm directly:
-sudo dnf downgrade ./OpenAudible_<old version>_x86_64.rpm
+sudo dnf history undo <id>                  # reverses it, only if dnf can still fetch the old package
+# or put the vendor's older rpm back with rpm itself:
+sudo rpm -Uvh --oldpackage ./OpenAudible_<old version>_x86_64.rpm
 ```
+
+There is no package repository behind OpenAudible, so `sudo dnf downgrade
+OpenAudible` works only if a configured repo happens to carry the older version;
+do not count on it. Whether `dnf install` accepts a lower-version local rpm
+depends on the dnf version, which is why the local-file route uses `rpm
+--oldpackage`.
 
 The older rpm comes from OpenAudible: the manifest's `download_dir` is
 `https://github.com/openaudible/openaudible/releases/download/v<version>/`, so an

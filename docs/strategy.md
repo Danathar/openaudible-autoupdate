@@ -48,21 +48,24 @@ From [`README.md`](../README.md):
 
 ## Measurable goals
 
-Each goal names the place it is measured. "Now" means the answer changes as the
-repository does; run the command for today's answer.
+Each goal names the place it is measured. Several of those places are added by
+the ACMM pull requests in [`agent-tasks/2026-10-10.md`](agent-tasks/2026-10-10.md)
+and do not exist at the baseline read below (`d769ba1`); the table says what they
+are planned to be, and each file's own header is the source of truth once it
+merges. Run the command for today's answer.
 
 | goal | measured by | where |
 |---|---|---|
 | Reach and hold the target ACMM level | the ACMM evaluator's result for this repo; open criteria are the `[ACMM L<n>]` issues | `gh issue list --repo Danathar/openaudible-autoupdate --state open --limit 100` (titles start with `[ACMM`) |
 | `main` stays green | the jobs in `.github/workflows/ci.yml` on pushes to `main` | `gh run list --repo Danathar/openaudible-autoupdate --workflow ci.yml --branch main --limit 10 --json createdAt,conclusion` |
-| Tests do not lose coverage | the floor in `.coverage-thresholds.json`, enforced by `.github/workflows/coverage-gate.yml` | a floor guards against regression, it is not a target to climb |
-| The script still matches OpenAudible's manifest | the nightly manifest-contract check in `.github/workflows/nightly-compliance.yml`, which fetches the live manifest and checks that the fields the script reads are still there | `gh run list --repo Danathar/openaudible-autoupdate --workflow nightly-compliance.yml --limit 7` |
+| Tests do not lose coverage | planned: a floor in `.coverage-thresholds.json`, enforced by `.github/workflows/coverage-gate.yml` (#8); neither exists at the baseline | a floor guards against regression, it is not a target to climb |
+| The script still matches OpenAudible's manifest | planned: a nightly manifest-contract check, assigned to `.github/workflows/nightly-compliance.yml` (#26), that fetches the live manifest and checks that the fields the script reads are still there; confirm it exists in that file before relying on it | `gh run list --repo Danathar/openaudible-autoupdate --workflow nightly-compliance.yml --limit 7` |
 | Change flow is visible | PR counts, review findings, CI outcomes, read by `scripts/pr-metrics.mjs` | [`metrics.md`](metrics.md), dated snapshots in [`metrics/`](metrics/) |
 | Agent work is traceable | every agent PR has `Closes #N`, a signature line and a human merger | [`agent-tasks/`](agent-tasks/README.md), the `agent-audit.yml` run summary |
 
 The fields the script depends on are `.version`, `.download_dir` and
 `.platforms[$PLATFORM_KEY].file` and `.sha256`
-(`openaudible-autoupdate.sh:38-41`). The contract check exists because
+(`openaudible-autoupdate.sh:38-41`). The contract check is planned because
 OpenAudible controls that file, not this repository.
 
 None of these is a velocity target. Throughput and coverage percentage are not
