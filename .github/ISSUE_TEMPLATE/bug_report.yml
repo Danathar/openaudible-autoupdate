@@ -16,7 +16,7 @@ body:
     id: output
     attributes:
       label: Script output
-      description: Output of `journalctl --user -u openaudible-autoupdate.service` (or of a manual run you made).
+      description: Output of `journalctl --user -u openaudible-autoupdate.service` from the normal timer/service run. Do not run the updater manually just to produce logs; it ends in `sudo dnf install -y`.
       render: text
     validations:
       required: true

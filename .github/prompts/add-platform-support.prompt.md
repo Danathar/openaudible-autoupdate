@@ -17,8 +17,9 @@ and `apt-get install`, or an aarch64 key).
    and the three env vars backward compatible; no distrobox logic in the script.
 3. Implement, then add bats tests with stubbed `dpkg-query`/`apt-get` (or the
    relevant tools) covering up-to-date, update, checksum mismatch, and not
-   installed. Add an e2e case in `tests/e2e/` using a container of the target
+   installed. Add an e2e case in `tests/e2e/` (see `run.sh`/`in-container.sh`) using a container of the target
    distro.
 4. Update README (Requirements, Configuration) and AGENTS.md.
-5. Run `shellcheck`, `bats tests/`, and the e2e tests. Never run the script
-   unstubbed on the host.
+5. Run `git ls-files -z '*.sh' '*.bash' '*.bats' | xargs -0 shellcheck`, `bats tests/unit`, and `tests/e2e/run.sh`. Never run the script
+   unstubbed on the host. Any `gh` command passes
+   `--repo Danathar/openaudible-autoupdate`.

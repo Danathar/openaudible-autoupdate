@@ -14,6 +14,7 @@ reviewable.
    `openaudible-autoupdate.sh` and `systemd/`.
 4. Draft release notes and show them to the owner. Creating the tag or the
    GitHub release is the owner's call: do not run
-   `git tag`/`gh release create` unless explicitly asked.
-5. Never run the updater to "smoke test" the release; use `bats tests/` and
-   `tests/e2e/`.
+   `git tag`/`gh release create --repo Danathar/openaudible-autoupdate` unless
+   explicitly asked.
+5. Never run the updater to "smoke test" the release; use `bats tests/unit` and
+   `tests/e2e/run.sh`.

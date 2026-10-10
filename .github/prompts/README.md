@@ -3,7 +3,8 @@
 Reusable prompt files for Copilot Chat / VS Code (`.prompt.md`); the
 content works as a plain prompt in any other tool. All of them assume the rules
 in [AGENTS.md](../../AGENTS.md), most importantly: never run
-`openaudible-autoupdate.sh` unstubbed, and never weaken the sha256 check.
+`openaudible-autoupdate.sh` unstubbed, and never weaken the sha256 check. Any `gh` command passes
+`--repo Danathar/openaudible-autoupdate`.
 
 | Prompt | Use it when |
 |---|---|

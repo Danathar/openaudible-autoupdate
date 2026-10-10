@@ -17,8 +17,10 @@ shape. Fix `openaudible-autoupdate.sh` safely.
    `null`, the script must fail, never install unverified. Note the existing
    code treats a missing `file` as an error but compares `sha256` directly, so
    check what an empty/`null` expected hash does.
-4. Add a bats test in `tests/` with a fixture of the new shape (stubbed `curl`).
-5. Run `shellcheck openaudible-autoupdate.sh` and `bats tests/`.
+4. Add a bats test in `tests/unit/openaudible-autoupdate.bats` with a fixture of the new shape (stubbed `curl`).
+5. Run `git ls-files -z '*.sh' '*.bash' '*.bats' | xargs -0 shellcheck` and `bats tests/unit`.
 6. Do not run the script for real (it runs `sudo dnf install`).
+
+Any `gh` command passes `--repo Danathar/openaudible-autoupdate`.
 
 Report the old vs. new manifest shape and the checks you ran.

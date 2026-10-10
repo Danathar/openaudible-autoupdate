@@ -13,9 +13,9 @@ Symptoms: "Platform key '...' not found in version manifest", jq errors, a
    `.platforms[$PLATFORM_KEY].file`, `.platforms[$PLATFORM_KEY].sha256`.
 3. Fix the `jq` expressions in `openaudible-autoupdate.sh`. Never "fix" a
    mismatch by dropping or loosening the sha256 comparison.
-4. Add a bats test in `tests/` with the new fixture; run
-   `shellcheck openaudible-autoupdate.sh` and `bats tests/`.
+4. Add a bats test in `tests/unit/openaudible-autoupdate.bats` with the new fixture; run
+   `git ls-files -z '*.sh' '*.bash' '*.bats' | xargs -0 shellcheck` and `bats tests/unit`.
 5. Update README (Configuration) if the key name default changes.
 
 See also `.github/prompts/manifest-format-change.prompt.md`. Never run the
-script unstubbed.
+script unstubbed. Any `gh` command: pass `--repo Danathar/openaudible-autoupdate`.

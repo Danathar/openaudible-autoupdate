@@ -22,4 +22,6 @@ Never run the script with real `rpm`/`dnf`/`sudo`: success ends in
 3. Run with `VERSION_URL=https://example.invalid/m.json PATH=<stubs>:$PATH bash openaudible-autoupdate.sh`.
 4. Expected outcomes: older installed -> "Checksum verified" and the `sudo` stub is called with `dnf install -y`; equal version -> "up to date" and no `sudo` call; wrong hash -> "Checksum mismatch" and exit 1 with no `sudo` call; unknown `PLATFORM_KEY` -> "not found in version manifest" and exit 1.
 
-Prefer encoding a case as a bats test in `tests/` over a one-off.
+Prefer encoding a case as a bats test in `tests/unit/openaudible-autoupdate.bats` over a one-off
+(`tests/unit/helpers.bash` already provides the stubs). Any `gh` command: pass
+`--repo Danathar/openaudible-autoupdate`.

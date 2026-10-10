@@ -35,8 +35,10 @@ Licence: GPL-3.0-only (see `LICENSE`). Default branch: `main`.
 | `systemd/openaudible-autoupdate.service` | `Type=oneshot`, `ExecStart=%h/bin/openaudible-autoupdate.sh` |
 | `systemd/openaudible-autoupdate.timer` | `OnCalendar=daily`, `RandomizedDelaySec=30m`, `Persistent=true` |
 | `README.md` | User docs, install, distrobox/Aurora usage |
-| `tests/` | bats unit tests using stub commands |
-| `tests/e2e/` | Container end-to-end tests |
+| `tests/unit/` | bats unit tests (`openaudible-autoupdate.bats`, stubs in `helpers.bash`) |
+| `tests/e2e/` | Container end-to-end test: `run.sh` (host side), `in-container.sh` |
+| `.shellcheckrc`, `.coverage-thresholds.json` | Lint config; coverage floor |
+| `scripts/coverage-gate.mjs` | Coverage gate used by `.github/workflows/coverage-gate.yml` |
 | `.github/workflows/ci.yml` | CI; its jobs are the required checks |
 
 ## Hard rules
@@ -44,8 +46,8 @@ Licence: GPL-3.0-only (see `LICENSE`). Default branch: `main`.
 - **NEVER run `openaudible-autoupdate.sh` for real on a host or dev machine.**
   The success path runs `sudo dnf install -y` and changes the system. Run it
   only with stubbed `curl`/`rpm`/`dnf`/`sudo`/`sha256sum` earlier on `PATH`
-  (that is what `tests/` does) or inside a throwaway container
-  (`tests/e2e/`). Never use `/tmp` for scratch work in this owner's
+  (that is what `tests/unit` does) or inside a throwaway container
+  (`tests/e2e/run.sh`). Never use `/tmp` for scratch work in this owner's
   environment; use `/var/tmp/<name>-*`.
 - **The checksum check must stay between download and install.** Never
   reorder, skip, soften, or make non-fatal the `sha256sum` comparison. Never
@@ -87,13 +89,17 @@ dnf sha256sum`. Optional: `systemd-cat`, `notify-send`.
 ## Testing
 
 ```bash
-shellcheck openaudible-autoupdate.sh   # static analysis
-bats tests/                            # unit tests with stub commands
+git ls-files -z '*.sh' '*.bash' '*.bats' | xargs -0 shellcheck   # lint, config in .shellcheckrc
+bats tests/unit                  # unit tests, stub commands only
+tests/e2e/run.sh                 # needs podman or docker; see below
 ```
 
-End-to-end tests live in `tests/e2e/` and run in a container (see the files in
-that directory for the entry point). Run them when you touch the download,
-checksum or install path. CI runs the same checks: see the jobs in
+`tests/e2e/run.sh` builds dummy OpenAudible rpms in a throwaway Fedora
+container, serves a manifest locally and runs the script there, including a
+real `dnf install` inside that container only. Run it when you touch the
+download, checksum or install path. Line coverage is gated by
+`.github/workflows/coverage-gate.yml` (floor in `.coverage-thresholds.json`;
+the README Testing section has the kcov command). CI runs the same checks: see the jobs in
 `.github/workflows/ci.yml`. Add or update a bats test for every behaviour
 change.
 
@@ -113,8 +119,12 @@ change.
 | `docs/risk-tiers.md` | Change classification by risk |
 | `docs/security/SECURITY-AI.md` | AI security policy |
 
-Several of these are added by sibling changes; if one is not on your branch
-yet, it will appear once that change merges.
+`policies/` is enforced by `node scripts/check-policies.mjs` (CI workflow
+`.github/workflows/policy-check.yml`); it requires the literal
+`--repo Danathar/openaudible-autoupdate` in every agent-direction file and
+guards the install path against verification bypasses. Run it after editing
+agent docs, and run `node --test scripts/tests/*.test.mjs` if you change
+scripts.
 
 ## Session continuity
 

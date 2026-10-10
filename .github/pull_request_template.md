@@ -6,9 +6,10 @@
 
 <!-- Paste the exact commands and observed results. -->
 
-- [ ] `shellcheck openaudible-autoupdate.sh`
-- [ ] `bats tests/`
-- [ ] `tests/e2e/` (required if the download, checksum, or `dnf install` path changed)
+- [ ] `git ls-files -z '*.sh' '*.bash' '*.bats' | xargs -0 shellcheck`
+- [ ] `bats tests/unit`
+- [ ] `tests/e2e/run.sh` (required if the download, checksum, or `dnf install` path changed)
+- [ ] `node scripts/check-policies.mjs` (if agent docs, policies or workflows changed)
 - [ ] Added/updated a bats test for each behaviour change
 - [ ] README updated if behaviour or configuration changed
 

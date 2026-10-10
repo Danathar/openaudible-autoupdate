@@ -8,12 +8,14 @@ description: Run the project's static analysis and tests (shellcheck, bats, opti
 From the repo root (use absolute paths or `git -C`, not `cd`):
 
 ```bash
-shellcheck openaudible-autoupdate.sh
-bats tests/
+git ls-files -z '*.sh' '*.bash' '*.bats' | xargs -0 shellcheck
+bats tests/unit
 ```
 
 If the change touches download, checksum, or `dnf install`, also run the
-container tests in `tests/e2e/` (see the entry point in that directory).
+container tests: `tests/e2e/run.sh` (needs podman or docker). After editing
+agent docs/policies/workflows also run `node scripts/check-policies.mjs`.
+Any `gh` command: pass `--repo Danathar/openaudible-autoupdate`.
 
 Report the exact commands and observed results. These are the same checks as
 the jobs in `.github/workflows/ci.yml`. If `shellcheck` or `bats` is missing,
