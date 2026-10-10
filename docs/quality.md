@@ -7,20 +7,33 @@ for this repository are at
 <https://github.com/Danathar/openaudible-autoupdate/actions>. Every `gh`
 command below names the repository so it works from any clone.
 
-**Last reviewed:** 2026-10-10, at `main` = `f1c6c55`.
+**Last reviewed:** 2026-10-10, at `main` = `63d17bf`.
 
 The signals are split by state, because this repository gained them in
 separate pull requests: the first table is what is on `main` (plus this PR's
 own PR-metrics files), the second is what exists only in an open PR and so
 does not run on `main` yet.
 
-## Signals on `main` (f1c6c55)
+## Signals on `main` (63d17bf)
 
 | signal | where it lives | what it tells you | blocks merge |
 |---|---|---|---|
-| CI jobs | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml): `Lint (shellcheck)`, `Unit tests (<matrix entry>)`, `E2E (fedora container)` | shellcheck (pinned release), the bats unit tests in `tests/unit/` with stubbed commands (never a real `dnf`), and the container end-to-end test in `tests/e2e/` | these job names are what the main ruleset requires, see [branch-protection.md](branch-protection.md) (arrives in #58) |
-| coverage gate | [`.github/workflows/coverage-gate.yml`](../.github/workflows/coverage-gate.yml) (job `Coverage gate`), floor in [`.coverage-thresholds.json`](../.coverage-thresholds.json), checker `scripts/coverage-gate.mjs` | line coverage of `openaudible-autoupdate.sh` under the bats tests (kcov) has not dropped below the floor | per the ruleset in #58 |
+| CI jobs | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml): `Lint (shellcheck)`, `Unit tests (<matrix entry>)`, `E2E (fedora container)` | shellcheck (pinned release), the bats unit tests in `tests/unit/` with stubbed commands (never a real `dnf`), and the container end-to-end test in `tests/e2e/` | yes, all three: see "Required checks" below |
+| coverage gate | [`.github/workflows/coverage-gate.yml`](../.github/workflows/coverage-gate.yml) (job `Coverage gate`), floor in [`.coverage-thresholds.json`](../.coverage-thresholds.json), checker `scripts/coverage-gate.mjs` | line coverage of `openaudible-autoupdate.sh` under the bats tests (kcov) has not dropped below the floor | yes: see "Required checks" below |
+| policy check | [`.github/workflows/policy-check.yml`](../.github/workflows/policy-check.yml) (job `policy-check`), `scripts/check-policies.mjs`, [`policies/`](../policies/README.md) | the repository still satisfies its machine-checkable policies (install safety, repo target, workflow permissions); `node scripts/check-policies.mjs` runs it locally | yes: see "Required checks" below |
 | PR metrics | [`.github/workflows/pr-metrics.yml`](../.github/workflows/pr-metrics.yml), definitions in [metrics.md](metrics.md), readings in [metrics/](metrics/README.md) (this PR, #53) | acceptance rate and time to merge, by author class | no, report only |
+
+## Required checks
+
+The ruleset on `main` requires six status checks: `Lint (shellcheck)`,
+`Unit tests (ubuntu bash)`, `Unit tests (fedora container)`,
+`E2E (fedora container)`, `Coverage gate` and `policy-check`. They come from
+`ci.yml` (the first four), `coverage-gate.yml` and `policy-check.yml`. Read on 2026-10-10 with
+`gh api repos/Danathar/openaudible-autoupdate/rulesets/24826574`, which
+printed those six contexts; #58 records the ruleset as
+`.github/rulesets/main.json`. The strict
+setting means a PR must also be up to date with `main`. PR metrics is not
+required.
 
 ## Signals that exist only in an open PR
 
@@ -30,7 +43,6 @@ not given, since they would not resolve.
 
 | signal | open PR | what it will tell you |
 |---|---|---|
-| policy check (`policy-check.yml`, `scripts/check-policies.mjs`, `policies/`) | #55 | agent-facing policy files are well formed and consistent |
 | agent tooling tests (`agent-tooling.yml`) | #57 | `node --test` over `scripts/tests/` and `.claude/hooks/tests/` |
 | agent audit (`agent-audit.yml`) | #56 | weekly check that merged agent PRs have a linked issue, the signature line, an acceptable merger and base `main` |
 | nightly compliance (`nightly-compliance.yml`) | #56 | scheduled re-check, including an `upstream-contract` job that reads the live OpenAudible manifest |
