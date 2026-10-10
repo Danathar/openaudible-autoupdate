@@ -49,11 +49,10 @@ Entry format:
 
 ---
 
-## Current state (as of 2026-10-09)
+## Current state (as of 2026-10-10)
 
-Written by the ACMM rollout PR for the agent-learning issues (#16, #21-#24,
-#32, #33, #38), on top of `main` at `1305b17` (foundation #54, governance #55
-and automation #56 merged). Re-verify with `git log origin/main`.
+`main` at `a5f831d9` has all eight ACMM pull requests (#51-#58); every issue
+from #1 to #50 is closed. Re-verify with `git log origin/main`.
 
 - **What the repo is:** one Bash script, `openaudible-autoupdate.sh` (78
   lines), two systemd user units in `systemd/`, `README.md`, `LICENSE` (GNU GPL
@@ -74,26 +73,28 @@ and automation #56 merged). Re-verify with `git log origin/main`.
   `Unit tests (fedora container)`, `E2E (fedora container)`, `Coverage gate`
   and `policy-check`; the branch must be up to date with `main`. Hive's merge
   strategy for this repo is `hive-serialized`.
-- **Agent tooling (this PR):** `.claude/settings.json` registers
+- **Agent tooling:** `.claude/settings.json` registers
   `.claude/hooks/guard-bash.mjs` on every Bash call; `agent-tooling.yml` runs
-  `node --test` over `scripts/tests/` and `.claude/hooks/tests/`.
+  `node --test` over `scripts/tests/` and `.claude/hooks/tests/`. Agent
+  directions live in `AGENTS.md` (authoritative), `CLAUDE.md`, Copilot, Cursor,
+  `.github/prompts/` and `.claude/skills/`.
+- **Secrets:** `claude.yml` and `ai-fix.yml` skip their agent step until one of
+  `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is set. Their pushes use the
+  workflow token, which does not start other workflows; re-run checks by hand.
 - **Not verified from this repository:** whether the owner's timer is enabled
   on their machine, and which container (if any) holds their OpenAudible rpm.
 
-## Last session: 2026-10-09 - ACMM learning artifacts (#16, #21-#24, #32, #33, #38)
+## Last session: 2026-10-10 - ACMM tickets #1-#50
 
-**Done:** the learning PR adds the guard hook and its tests, the permission
-settings, five memory entries, this file and the first reflection; not merged
-when this was written.
-**In flight:** the PR that adds these files, and whatever else is open (check
-`gh pr list --repo Danathar/openaudible-autoupdate`).
-**Blocked on:** the owner's review and merge.
-**Watch:** the hook's stubs-on-`PATH` exemption needs a committed directory
-`tests/<dir>` holding executable `sudo`, `dnf` and `rpm`, named by an absolute
-or `$CLAUDE_PROJECT_DIR`-anchored `PATH` entry. Nothing in `main` provides one:
-the bats helpers build stubs in `$BATS_TEST_TMPDIR` at run time and the e2e
-test runs through `tests/e2e/run.sh` in a container. So the exemption is
-unused today; remove `stubsDirOk` and its tests if nobody wants it.
+**Done:** PRs #51-#58 merged (order and merge commits in
+[../docs/agent-tasks/2026-10-10.md](../docs/agent-tasks/2026-10-10.md));
+ruleset 24826574 applied with six required checks; private vulnerability
+reporting enabled.
+**In flight:** nothing.
+**Blocked on:** nothing.
+**Watch:** the hook's stubs-on-`PATH` exemption is used by the
+`test-against-fake-manifest` skill (`tests/.fake-host/`, gitignored); nothing
+else relies on it.
 
 ## Open threads
 
@@ -102,9 +103,15 @@ unused today; remove `stubsDirOk` and its tests if nobody wants it.
   a run naming the updater also names a `tests/e2e` path, and refuses
   `exec`/`attach`; `--privileged` or a host-root bind mount is not checked, and
   any argument that merely contains `tests/e2e` satisfies the exemption.
+- Script findings recorded but not fixed (see
+  [../docs/security/SECURITY-AI.md](../docs/security/SECURITY-AI.md)): the
+  manifest's `file` value is used in a path unvalidated (`../` escapes the temp
+  dir); `download_dir` is not limited to https or a host; the version check is
+  `!=`, so an older manifest version downgrades; a missing `.version` reads as
+  `null` and is treated as an update; invalid manifest JSON exits without a log
+  line.
 
 ## Next steps
 
-1. Owner reviews and merges the learning PR; then a handoff PR rewrites this
-   file from `origin/main`.
-2. Decide whether to keep the stubs-directory exemption (see "Watch").
+1. Owner decides whether to fix the script findings above (each is a small,
+   testable change to `openaudible-autoupdate.sh`).
