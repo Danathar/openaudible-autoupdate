@@ -4,7 +4,7 @@ For the owner. It says how to notice each automated signal in this repository,
 what to check first, and what to do, and how to stop each automation.
 
 **The safety rule comes first.** `openaudible-autoupdate.sh` runs
-`sudo dnf install -y` (`openaudible-autoupdate.sh:68`). Nothing in this runbook,
+`sudo dnf install -y` (`openaudible-autoupdate.sh:70`). Nothing in this runbook,
 and no agent, runs it for real to "see what happens". Reproduce with stub
 `curl`, `rpm`, `sudo` and `dnf` on `PATH`, or in a throwaway container. Every
 `gh` command here passes `--repo Danathar/openaudible-autoupdate`.
@@ -58,35 +58,36 @@ brings it back). A workflow can be named by its file name, so no `name:` needs
 looking up:
 
 ```bash
-gh workflow disable <file>.yml --repo Danathar/openaudible-autoupdate
-gh workflow enable  <file>.yml --repo Danathar/openaudible-autoupdate
+gh workflow disable "<workflow name>" --repo Danathar/openaudible-autoupdate
+gh workflow enable  "<workflow name>" --repo Danathar/openaudible-autoupdate
 gh workflow list --repo Danathar/openaudible-autoupdate --all
 ```
 
 Disabling a required check leaves pull requests waiting for a status that never
-arrives. Disable `ci.yml` only if you also relax the ruleset
+arrives. Disable `CI` or `Coverage gate` only if you also relax the ruleset
 ([`branch-protection.md`](branch-protection.md)). To remove a workflow
 permanently, delete the file in a pull request.
 
-| file | what it does | turn off |
+| file | `name:` (use it to disable) | what it does and when it runs |
 |---|---|---|
-| `ci.yml` | the test jobs (shellcheck, bats unit tests with stubbed commands, container end-to-end); the checks the ruleset requires | `gh workflow disable ci.yml --repo Danathar/openaudible-autoupdate` |
-| `coverage-gate.yml` | fails a PR whose coverage falls below the floor in `.coverage-thresholds.json` | `gh workflow disable coverage-gate.yml --repo Danathar/openaudible-autoupdate` |
-| `auto-qa.yml` | runs `scripts/auto-qa-tuner.mjs` against `.github/auto-qa-tuning.json` to report whether a floor should move | `gh workflow disable auto-qa.yml --repo Danathar/openaudible-autoupdate` |
-| `nightly-compliance.yml` | the scheduled compliance checks (#26); the manifest-contract check against the live OpenAudible manifest is intended to live here, so confirm it in the file header | `gh workflow disable nightly-compliance.yml --repo Danathar/openaudible-autoupdate` |
-| `pr-metrics.yml` | runs `scripts/pr-metrics.mjs` for [`metrics.md`](metrics.md) | `gh workflow disable pr-metrics.yml --repo Danathar/openaudible-autoupdate` |
-| `agent-audit.yml` | reads back which agent PRs have `Closes #N`, a signature line and a human merger (`scripts/ai-audit-report.mjs`) | `gh workflow disable agent-audit.yml --repo Danathar/openaudible-autoupdate` |
-| `auto-issues.yml` | opens or comments on a tracking issue when a monitored workflow fails | `gh workflow disable auto-issues.yml --repo Danathar/openaudible-autoupdate` |
-| `ai-fix.yml` | on the `ai-fix-requested` label or an `/ai-fix` comment from a trusted person, asks Claude Code to verify review findings and apply those that hold | `gh workflow disable ai-fix.yml --repo Danathar/openaudible-autoupdate`, or never apply the label |
-| `claude.yml` | answers an `@claude` mention from a trusted person; needs an Anthropic credential secret, and without one skips | remove the secret, or `gh workflow disable claude.yml --repo Danathar/openaudible-autoupdate` |
-| `labeler.yml` | labels PRs from the paths they change, using [`.github/labeler.yml`](../.github/labeler.yml) | `gh workflow disable labeler.yml --repo Danathar/openaudible-autoupdate` |
-| `policy-check.yml` | runs `scripts/check-policies.mjs` over `policies/` and `risk-config.json` | `gh workflow disable policy-check.yml --repo Danathar/openaudible-autoupdate` |
-| `agent-tooling.yml` | runs `node --test` over `scripts/tests/*.test.mjs` and `.claude/hooks/tests/*.test.mjs` | `gh workflow disable agent-tooling.yml --repo Danathar/openaudible-autoupdate` |
+| `ci.yml` | `CI` | jobs `Lint (shellcheck)`, `Unit tests (ubuntu bash)`, `Unit tests (fedora container)`, `E2E (fedora container)`; every pull request and every push to `main` |
+| `coverage-gate.yml` | `Coverage gate` | measures line coverage of the script under the bats tests with kcov in a Fedora container and fails below the floor in `.coverage-thresholds.json`; pull requests and pushes to `main` |
+| `nightly-compliance.yml` | `Nightly compliance` | 04:23 UTC daily and manual: repeats unit, shellcheck and e2e jobs, and runs `Upstream manifest contract` against the live OpenAudible manifest; on failure opens or updates one tracking issue and never closes it |
+| `auto-qa.yml` | `Auto-QA` | Mondays 05:17 UTC and manual: measures coverage like the gate, runs `scripts/auto-qa-tuner.mjs` with `.github/auto-qa-tuning.json`, and opens or updates one issue proposing a higher floor; never commits, never lowers a floor |
+| `pr-metrics.yml` | `PR metrics` | Mondays 06:17 UTC and manual: runs `scripts/pr-metrics.mjs`, writes a step summary and a `pr-metrics` artifact; read-only ([`metrics.md`](metrics.md)) |
+| `agent-audit.yml` | `Agent audit trail` | Mondays 05:17 UTC and manual: `scripts/ai-audit-report.mjs --strict` checks agent PRs for a linked issue, a signature line and a human (or Hive lane) merger; a violation turns the run red, nothing is written |
+| `auto-issues.yml` | `Auto issues` | when `CI` completes as failure, timed out or startup failure on a push to `main`, opens or comments on one tracking issue; never closes it |
+| `ai-fix.yml` | `AI fix requested` | on label `ai-fix-requested` (issue or PR) or an `/ai-fix` comment from the owner, a member or a collaborator, asks Claude Code to verify review findings and apply those that hold; skips bots and fork PRs |
+| `claude.yml` | `Claude` | an `@claude` comment (issue, PR conversation or PR review comment) from the owner, a member or a collaborator; refuses fork PRs; without `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` it writes a summary and skips |
+| `labeler.yml` | `Labeler` | labels pull requests by changed paths using [`.github/labeler.yml`](../.github/labeler.yml); skipped for fork PRs |
+| `policy-check.yml` | `Policy check` | runs `scripts/check-policies.mjs` over `policies/` and `risk-config.json`, then its tests; pull requests and pushes to `main` |
+| `agent-tooling.yml` | `Agent tooling` | `node --test` over `scripts/tests/*.test.mjs` and `.claude/hooks/tests/*.test.mjs`; pull requests and pushes to `main` that touch `.claude/**`, `scripts/**` or the workflow itself |
 
-Some of these arrive with the ACMM pull requests in
-[`agent-tasks/2026-10-10.md`](agent-tasks/2026-10-10.md) and exist only once
-those merge. A header comment at the top of each file explains its triggers and
-gating; that header, not this table, is the source of truth if they differ.
+These are the workflows in the pull requests listed in
+[`agent-tasks/2026-10-10.md`](agent-tasks/2026-10-10.md); they exist on `main`
+only once those merge. A header comment at the top of each file explains its
+triggers and gating; that header, not this table, is the source of truth if they
+differ. Get the exact `name:` with `grep -m1 '^name:' .github/workflows/<file>`.
 
 The agent workflows hold a write token, so they never use `pull_request_target`
 and they skip bots and outsiders before doing anything. If you doubt one,
@@ -94,7 +95,7 @@ disable it first and read it afterwards.
 
 ## A red `main`
 
-Signal: a run of `ci.yml` on a push to `main` fails, or `auto-issues.yml` opened
+Signal: a run of `CI` on a push to `main` fails, or `auto-issues.yml` opened
 an issue for the failing workflow.
 
 ```bash
@@ -123,10 +124,10 @@ gh run view "$RUN" --repo Danathar/openaudible-autoupdate --log-failed
 
 ## OpenAudible changed its manifest
 
-Signal: the nightly manifest-contract check (intended for `nightly-compliance.yml`; confirm it is there) fails, or a user reports the script failing. The script
+Signal: the `Upstream manifest contract` job of `Nightly compliance` fails (the tracking issue says so), or a user reports the script failing. The script
 depends on `.version`, `.download_dir` and `.platforms[$PLATFORM_KEY].file` /
 `.sha256` of `https://openaudible.org/downloads/swt_version.json`
-(`openaudible-autoupdate.sh:38-41`). OpenAudible, not this repository, controls
+(`openaudible-autoupdate.sh:40-43`). OpenAudible, not this repository, controls
 that file.
 
 ```bash
@@ -138,7 +139,7 @@ Read the result against what the script expects:
 
 1. **A key is missing or renamed.** If `.platforms.linux_x86_64_rpm` is gone, the
    script logs `Platform key '...' not found in version manifest.` and exits 1
-   (`openaudible-autoupdate.sh:43-46`), so it fails safely: no install happens.
+   (`openaudible-autoupdate.sh:45-48`), so it fails safely: no install happens.
    Find the new key name and either change the default of `PLATFORM_KEY`
    (`openaudible-autoupdate.sh:13`) and the README configuration table in one
    pull request, or tell affected users to set `PLATFORM_KEY` in the service.
@@ -184,15 +185,16 @@ vendor's release (these commands were not run for this page):
 ```bash
 sudo dnf history list                       # find the transaction that upgraded OpenAudible
 sudo dnf history undo <id>                  # reverses it, only if dnf can still fetch the old package
-# or put the vendor's older rpm back with rpm itself:
-sudo rpm -Uvh --oldpackage ./OpenAudible_<old version>_x86_64.rpm
+# or install the vendor's older rpm as a local file, so dnf still solves dependencies:
+sudo dnf install ./OpenAudible_<old version>_x86_64.rpm
 ```
 
 There is no package repository behind OpenAudible, so `sudo dnf downgrade
-OpenAudible` works only if a configured repo happens to carry the older version;
-do not count on it. Whether `dnf install` accepts a lower-version local rpm
-depends on the dnf version, which is why the local-file route uses `rpm
---oldpackage`.
+OpenAudible` works only if a configured repo happens to carry the older version.
+Installing a local rpm file with `dnf install` is how a specific version is put
+back when no repository provides it, and it keeps dependency solving. If dnf
+refuses with a message about a newer version being installed, read that message
+before forcing anything; this page does not prescribe a flag that was not tried.
 
 The older rpm comes from OpenAudible: the manifest's `download_dir` is
 `https://github.com/openaudible/openaudible/releases/download/v<version>/`, so an
@@ -204,7 +206,7 @@ leave the timer off, and re-enable it when a good release is out.
 **Fix the cause in this repository** if the script caused it:
 
 - The script installs whenever the manifest version differs from the installed
-  version (`openaudible-autoupdate.sh:48`), not only when it is higher. If the
+  version (`openaudible-autoupdate.sh:50`), not only when it is higher. If the
   vendor republishes an older version number, it will install that. A fix is a
   comparison change plus a test with stubbed versions.
 - Revert the offending merge by pull request, say in the PR what users must do

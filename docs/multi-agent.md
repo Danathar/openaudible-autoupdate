@@ -15,7 +15,7 @@ clone or worktree.
 ## Rule 1: never run the updater for real
 
 `openaudible-autoupdate.sh` ends in `sudo dnf install -y` on a downloaded rpm
-(`openaudible-autoupdate.sh:68`). An agent must not run it on the owner's host.
+(`openaudible-autoupdate.sh:70`). An agent must not run it on the owner's host.
 Run it only with stub `curl`, `rpm`, `sudo` and `dnf` first on `PATH`, or inside
 a throwaway container. This is the one rule no task is allowed to override.
 
@@ -104,7 +104,7 @@ reading and settled by the owner.
    - **`openaudible-autoupdate.sh`** is the product and the one file almost every
      behaviour change touches. Only one open pull request at a time should
      change its logic; a second one waits or rebases onto the first. The tests
-     in `tests/` pin its behaviour with stubbed commands, so a rebase that
+     in `tests/unit/` (bats, with stubbed commands) and `tests/e2e/` pin its behaviour with stubbed commands, so a rebase that
      passes them has kept the contract.
    - **`README.md`** documents that script (install, configuration variables,
      usage). A change to an environment variable (`VERSION_URL`, `PKG_NAME`,
@@ -123,11 +123,16 @@ reading and settled by the owner.
 No agent merges its own pull request unless the owner has set that up.
 
 - **Required checks.** The checks meant to gate a merge are the jobs in
-  [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). They run on every
-  pull request. The ruleset recorded in `.github/rulesets/main.json` and
-  explained in [`branch-protection.md`](branch-protection.md) (issue #42) names
-  the exact job names and whether branches must be up to date; read it there
-  rather than copying names into other docs. Check what is live with
+  [`.github/workflows/ci.yml`](../.github/workflows/ci.yml): `Lint (shellcheck)`,
+  `Unit tests (ubuntu bash)`, `Unit tests (fedora container)` and
+  `E2E (fedora container)`. They run on every pull request. The `Coverage gate`
+  job is a separate workflow
+  ([`coverage-gate.yml`](../.github/workflows/coverage-gate.yml)); whether the
+  ruleset also requires it is for the ruleset to say. The ruleset recorded in
+  `.github/rulesets/main.json` and explained in
+  [`branch-protection.md`](branch-protection.md) (issue #42) is the authority on
+  which checks are required and whether branches must be up to date; if it
+  disagrees with this paragraph, it wins. Check what is live with
   `gh api repos/Danathar/openaudible-autoupdate/rulesets --jq '.[] | [.name, .enforcement] | @tsv'`.
 - **Serialized merging (issue #42).** Hive merges this repository through its
   serialized lane (`merge_strategy: hive-serialized`): one pull request at a
