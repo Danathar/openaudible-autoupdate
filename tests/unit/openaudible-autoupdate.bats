@@ -124,7 +124,7 @@ assert_rejected_before_download() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"$1"* ]]
   [[ "$output" != *"Checksum verified."* ]]
-  [ -z "$(calls | grep '^curl .*/dl/')" ]
+  if calls | grep -q '^curl .*/dl/'; then return 1; fi
   [[ "$(calls)" == *"curl "*"swt_version.json"* ]]
   [[ "$(calls)" != *"sudo "* ]]
   [[ "$(calls)" != *"dnf "* ]]
