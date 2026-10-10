@@ -11,7 +11,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -103,13 +103,32 @@ const allowed = [
     'cat <<EOF\ngh pr create\nEOF',
     'git commit -m "$(cat <<\'EOF\'\nuse gh pr create --repo Danathar/openaudible-autoupdate\nEOF\n)"',
     // --- Updater only with verified stubs, or inside a throwaway container ---
-    'PATH=tests/stubs:$PATH ./openaudible-autoupdate.sh',
-    'PATH="$PWD/tests/stubs:$PATH" bash openaudible-autoupdate.sh',
+    `PATH=${PROJECT}/tests/stubs:$PATH ./openaudible-autoupdate.sh`,
+    `PATH="${PROJECT}/tests/stubs:$PATH" bash openaudible-autoupdate.sh`,
     'PATH=${CLAUDE_PROJECT_DIR}/tests/stubs:$PATH ./openaudible-autoupdate.sh',
-    'env PATH=tests/stubs:$PATH bash ./openaudible-autoupdate.sh',
-    'export PATH=tests/stubs:$PATH; ./openaudible-autoupdate.sh',
-    "bash -c 'PATH=tests/stubs:$PATH ./openaudible-autoupdate.sh'",
-    'PATH=tests/stubs:$PATH timeout 30 ./openaudible-autoupdate.sh',
+    `env PATH=${PROJECT}/tests/stubs:$PATH bash ./openaudible-autoupdate.sh`,
+    `export PATH=${PROJECT}/tests/stubs:$PATH; ./openaudible-autoupdate.sh`,
+    `bash -c 'PATH=${PROJECT}/tests/stubs:$PATH ./openaudible-autoupdate.sh'`,
+    `PATH=${PROJECT}/tests/stubs:$PATH timeout 30 ./openaudible-autoupdate.sh`,
+    // Reading or inspecting the script through a wrapper is not running it.
+    'timeout 120 shellcheck openaudible-autoupdate.sh',
+    'env SHELLCHECK_OPTS=-x shellcheck openaudible-autoupdate.sh',
+    'timeout 30 cat openaudible-autoupdate.sh',
+    'command -v openaudible-autoupdate',
+    'nice -n 5 shellcheck openaudible-autoupdate.sh',
+    'cat openaudible-autoupdate.sh | wc -l',
+    'cat openaudible-autoupdate.sh > /var/tmp/copy.sh',
+    'shellcheck openaudible-autoupdate.sh 2>&1 | head',
+    'git push origin main 2>&1',
+    'git status 2>&1 | head',
+    'bats tests/unit 2>&1',
+    // Quoted heredoc bodies are data, even with backticks.
+    'gh pr create --repo Danathar/openaudible-autoupdate --base main --head feat/x --title t --body "$(cat <<\'EOF\'\nnever run `./openaudible-autoupdate.sh` or `sudo dnf install`; it\'s unsafe\nEOF\n)"',
+    'git commit -F - <<\'EOF\'\nfix: stop using `sudo dnf install` in docs\nEOF',
+    'cat > /var/tmp/pr-body.md <<\'EOF\'\nRun `git push` after `git status`\nEOF',
+    'rpm-ostree status',
+    'bootc status',
+    'pkcon search audible',
     'rpm -q -i OpenAudible',
     'podman run --rm -v "$PWD":/src:Z fedora:latest bash /src/tests/e2e/run.sh',
     // Reading the script is not running it.
@@ -286,7 +305,7 @@ const blocked = [
     ['bash -c "cd x && ./openaudible-autoupdate.sh"', 'would execute'],
     ['eval ./openaudible-autoupdate.sh', 'would execute'],
     ['echo $(./openaudible-autoupdate.sh)', 'would execute'],
-    ['systemd-run --user ./openaudible-autoupdate.sh', 'systemd-run'],
+    ['systemd-run --user ./openaudible-autoupdate.sh', 'would execute'],
     // A PATH that is not a verified stubs dir does not exempt it.
     ['PATH=tests/empty:$PATH ./openaudible-autoupdate.sh', 'would execute'],
     ['PATH=tests/partial:$PATH ./openaudible-autoupdate.sh', 'would execute'],
@@ -299,6 +318,49 @@ const blocked = [
     ['PATH=tests ./openaudible-autoupdate.sh', 'would execute'],
     ['export PATH=other/stubs:$PATH; ./openaudible-autoupdate.sh', 'would execute'],
     ['env PATH=tests/empty:$PATH bash openaudible-autoupdate.sh', 'would execute'],
+    ['PATH=tests/stubs:$PATH ./openaudible-autoupdate.sh', 'would execute'],
+    ['PATH="$PWD/tests/stubs:$PATH" bash openaudible-autoupdate.sh', 'would execute'],
+    ['PATH=$PWD/tests/stubs:$PATH ./openaudible-autoupdate.sh', 'would execute'],
+    [`PATH=${PROJECT}/tests/empty:$PATH ./openaudible-autoupdate.sh`, 'would execute'],
+    [`PATH=${PROJECT}/tests/partial:$PATH ./openaudible-autoupdate.sh`, 'would execute'],
+    [`PATH=${PROJECT}/other/stubs:$PATH ./openaudible-autoupdate.sh`, 'would execute'],
+    [`PATH=${PROJECT}/tests/../other/stubs:$PATH ./openaudible-autoupdate.sh`, 'would execute'],
+    [`PATH=${PROJECT}/tests/stubs:$PATH systemd-run --user ./openaudible-autoupdate.sh`, 'would execute'],
+    // Redirections are not part of the command word.
+    ['./openaudible-autoupdate.sh>/var/tmp/out.log 2>&1', 'would execute'],
+    ['./openaudible-autoupdate.sh >/var/tmp/out.log', 'would execute'],
+    ['./openaudible-autoupdate.sh 2>/dev/null', 'would execute'],
+    ['./openaudible-autoupdate.sh &>/var/tmp/out.log', 'would execute'],
+    ['bash ./openaudible-autoupdate.sh>log', 'would execute'],
+    ['bash ./openaudible-autoupdate.sh 2>&1 | tee log', 'would execute'],
+    ['sh<openaudible-autoupdate.sh', 'stdin'],
+    ['bash < openaudible-autoupdate.sh', 'stdin'],
+    ['bash -s <openaudible-autoupdate.sh', 'stdin'],
+    ['sudo>/dev/null true', 'privilege'],
+    ['dnf install>/dev/null x', 'changes packages'],
+    // A shell that reads the updater on stdin runs it.
+    ['cat openaudible-autoupdate.sh | bash', 'stdin'],
+    ['cat openaudible-autoupdate.sh | sh -s', 'stdin'],
+    ['cat ./openaudible-autoupdate.sh | env bash', 'stdin'],
+    ['bash -c "$(cat openaudible-autoupdate.sh)"', 'reading'],
+    ['sh -c "`cat openaudible-autoupdate.sh`"', 'reading'],
+    // Other privilege escalators and wrappers around them.
+    ['run0 dnf install -y x.rpm', 'privilege'],
+    ["su -c 'dnf install -y x.rpm'", 'privilege'],
+    ['systemd-run --user --scope sudo dnf install x', 'privilege'],
+    ['flatpak-spawn --host sudo dnf install x', 'privilege'],
+    ['flatpak-spawn --host dnf install x', 'changes packages'],
+    ['timeout -s KILL 5 sudo ls', 'privilege'],
+    ['nice -n 5 sudo ls', 'privilege'],
+    ['xargs -n1 sudo rm', 'privilege'],
+    // Image/package tools on the immutable host.
+    ['rpm-ostree install x.rpm', 'changes the booted image'],
+    ['rpm-ostree upgrade', 'changes the booted image'],
+    ['rpm-ostree override replace x', 'changes the booted image'],
+    ['bootc upgrade', 'changes the booted image'],
+    ['bootc switch quay.io/x/y', 'changes the booted image'],
+    ['pkcon install-local x.rpm', 'changes the booted image'],
+    ['pkcon update', 'changes the booted image'],
     // distrobox/toolbox are refused outright: they enter the real container.
     ['distrobox enter dev -- ./openaudible-autoupdate.sh', 'real long-lived container'],
     ['PATH=tests/stubs:$PATH distrobox enter dev -- ./openaudible-autoupdate.sh', 'real long-lived container'],
@@ -409,4 +471,12 @@ test('malformed hook input fails closed', () => {
     const r = spawnSync(process.execPath, [HOOK], { input: 'not json', encoding: 'utf8' });
     assert.equal(r.status, 2);
     assert.match(r.stderr, /fail/i);
+});
+
+test('still blocks when the hook is invoked through a symlinked path', () => {
+    const link = join(PROJECT, 'hook-link.mjs');
+    symlinkSync(HOOK, link);
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'sudo true' } });
+    const r = spawnSync(process.execPath, [link], { input, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: PROJECT } });
+    assert.equal(r.status, 2, r.stderr);
 });

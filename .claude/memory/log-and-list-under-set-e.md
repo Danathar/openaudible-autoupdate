@@ -1,31 +1,28 @@
-# log() ends in `cmd && cmd`; under `set -e` it exits 1 when systemd-cat is missing
+# Do not end a function or branch in `cmd && cmd` in a `set -e` script
 
 **Date:** 2026-10-09
-**Wrong:** assuming `log()` is a harmless wrapper around `echo`. Its last
-statement is `command -v systemd-cat >/dev/null 2>&1 && echo "$*" | systemd-cat -t "$LOG_TAG"`
-(`openaudible-autoupdate.sh:20` at `d769ba1`). A function returns the status of
-its last command. Where `systemd-cat` is not installed (a minimal container,
-for example), `command -v` fails, so `log` returns 1, and under `set -euo
-pipefail` (`openaudible-autoupdate.sh:9`) any plain `log "..."` call then
-aborts the script. The same shape is at line 70
-(`command -v notify-send ... && notify-send ...`), where it makes the exit
-status of the "upgraded" branch depend on whether `notify-send` exists.
-**Right:** write the condition as `if command -v systemd-cat >/dev/null 2>&1; then ... fi`,
-which returns 0 when the condition is false. Do not write `a && b` as the last
-command of a function or branch in a `set -e` script. Reproduced on this
-host with a stand-alone copy of the function (not the real script) and a
-command name that does not exist: `log first` printed its line, the next
-`echo` never ran, and the exit status was 1.
-**Why it matters:** every plain `log "..."` call (lines 24, 28, 34, 44, 49, 53,
-57, 63, 67, 69, 72) aborts the script where `systemd-cat` is missing. Worse,
-the paths that mean to exit 0 (lines 28-29 "not installed via rpm", lines
-49-50 "up to date") exit 1 instead, because `log` fails before the `exit 0`. A
-container or test environment without `systemd-cat` reports every run as a
-failure, with no message about why.
-**Status:** fixed by the foundation PR, `Danathar/openaudible-autoupdate#54`
-(`log()` (line 20) and the separate `notify-send` conditional (line 70) both
-become `if ...; then ...; fi`), which merges ahead of the PR that added this
-entry. If `main`'s `log()` still ends in `&&`, the fix has not landed. Once it
-has, rewrite this entry as history or delete it.
-**Evidence:** `openaudible-autoupdate.sh:9,18-21,70` at `d769ba1` (unchanged
-since the first commit `6caac1b`); PR #54's diff of `openaudible-autoupdate.sh`.
+**Wrong:** the original `log()` ended in
+`command -v systemd-cat >/dev/null 2>&1 && echo "$*" | systemd-cat -t "$LOG_TAG"`
+(`6caac1b:openaudible-autoupdate.sh:20`). A function returns the status of its
+last command. Where `systemd-cat` is not installed (a minimal container, for
+example), `command -v` fails, so `log` returned 1, and under `set -euo
+pipefail` (line 9) any plain `log "..."` call aborted the script. The same
+shape was at line 70 (`command -v notify-send ... && notify-send ...`), which
+made the exit status of the "upgraded" branch depend on whether `notify-send`
+exists. Reproduced on this host with a stand-alone copy of the function (not
+the real script) and a command name that does not exist: `log first` printed
+its line, the next `echo` never ran, and the exit status was 1.
+**Right:** write it as `if command -v systemd-cat >/dev/null 2>&1; then ... fi`,
+which returns 0 when the condition is false. That is what `main` has now:
+`log()` at `openaudible-autoupdate.sh:18-23` and the `notify-send` conditional
+at lines 72-74, both `if ...; then ...; fi`.
+**Why it matters:** in the original, every plain `log "..."` call where
+`systemd-cat` was missing aborted the run, including the paths that mean to
+exit 0 ("not installed via rpm", "up to date"), which exited 1 instead, with no
+message about why. Container and test environments were exactly where that
+happened.
+**Status:** fixed by `a8758f5` (`Danathar/openaudible-autoupdate#54`), which
+also has bats cases for it. Kept as the reason behind the rule; delete it when
+nobody is likely to write that shape again.
+**Evidence:** `git show 6caac1b:openaudible-autoupdate.sh` lines 9, 18-21, 70;
+`a8758f5`'s diff of `openaudible-autoupdate.sh`; `tests/unit/openaudible-autoupdate.bats`.

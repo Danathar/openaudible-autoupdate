@@ -51,65 +51,60 @@ Entry format:
 
 ## Current state (as of 2026-10-09)
 
-This is the first version of the file, written by the ACMM rollout PR for the
-agent-learning issues (#16, #21-#24, #32, #33, #38). It describes `main` at
-`d769ba1`, before any rollout PR has merged.
+Written by the ACMM rollout PR for the agent-learning issues (#16, #21-#24,
+#32, #33, #38), on top of `main` at `1305b17` (foundation #54, governance #55
+and automation #56 merged). Re-verify with `git log origin/main`.
 
-- **What the repo is:** one Bash script, `openaudible-autoupdate.sh` (74 lines),
-  two systemd user units in `systemd/`, `README.md`, `LICENSE` (GNU GPL v3) and
-  `.gitignore`. It checks OpenAudible's manifest
+- **What the repo is:** one Bash script, `openaudible-autoupdate.sh` (78
+  lines), two systemd user units in `systemd/`, `README.md`, `LICENSE` (GNU GPL
+  v3), tests under `tests/unit` (bats) and `tests/e2e` (container), and the
+  agent tooling. The script checks OpenAudible's manifest
   (`https://openaudible.org/downloads/swt_version.json`) against the installed
   `OpenAudible` rpm, downloads the rpm, compares its sha256 and runs
   `sudo dnf install -y`.
-- **History:** four commits, `6caac1b` (script, units, README, LICENSE) to
-  `d769ba1` (README note callout). The script has not changed since `6caac1b`.
-- **Known defects on `main`:** `log()` returns 1 when `systemd-cat` is missing
-  and kills the run under `set -e` (see
-  [memory/log-and-list-under-set-e.md](memory/log-and-list-under-set-e.md));
-  fixed in PR #54, which merges ahead of this PR. The version check is
-  equality, not "newer" ([memory/version-check-is-equality.md](memory/version-check-is-equality.md)).
-- **ACMM rollout:** the fifty `[ACMM ...]` issues are being worked as seven
-  slices, one PR each against `main`: #51 (agent directions), #52 (autonomy
-  docs), #53 (metrics and quality), #54 (tests, CI, coverage gate), #55
-  (governance), #56 (automation), plus the PR that adds this file. All were
-  open when this was written. Until they merge, `main` has no tests, no CI, no
-  `.claude/` and no `AGENTS.md`.
+- **Script history:** `6caac1b` (first version), `a8758f5` (`log()` and
+  `notify-send` no longer fail under `set -e`; added by #54) and `56c0b3f`
+  (shellcheck fixes, `awk` dependency check).
+- **Known behaviour to remember:** the version check is equality, not "newer"
+  ([memory/version-check-is-equality.md](memory/version-check-is-equality.md)).
+  The `log()` bug is fixed; its entry is kept as history
+  ([memory/log-and-list-under-set-e.md](memory/log-and-list-under-set-e.md)).
+- **Checks and merging:** ruleset `protect main` (id 24826574) is active and
+  requires six checks: `Lint (shellcheck)`, `Unit tests (ubuntu bash)`,
+  `Unit tests (fedora container)`, `E2E (fedora container)`, `Coverage gate`
+  and `policy-check`; the branch must be up to date with `main`. Hive's merge
+  strategy for this repo is `hive-serialized`.
 - **Agent tooling (this PR):** `.claude/settings.json` registers
   `.claude/hooks/guard-bash.mjs` on every Bash call; `agent-tooling.yml` runs
   `node --test` over `scripts/tests/` and `.claude/hooks/tests/`.
-- **Branch protection / merge strategy:** no ruleset existed when this was
-  written (`gh api repos/Danathar/openaudible-autoupdate/rulesets` returned
-  none). Hive's merge strategy for this repo is `hive-serialized`, as set by the
-  owner and read back from Hive's API by the rollout lead.
 - **Not verified from this repository:** whether the owner's timer is enabled
   on their machine, and which container (if any) holds their OpenAudible rpm.
 
 ## Last session: 2026-10-09 - ACMM learning artifacts (#16, #21-#24, #32, #33, #38)
 
-**Done:** nothing merged yet; the PR adds the guard hook and its tests, the
-permission settings, five memory entries, this file, and the first reflection.
-**In flight:** PRs #51-#56 and the PR for this slice; none merged.
-**Blocked on:** the owner's review and merge of those PRs.
+**Done:** the learning PR adds the guard hook and its tests, the permission
+settings, five memory entries, this file and the first reflection; not merged
+when this was written.
+**In flight:** the PR that adds these files, and whatever else is open (check
+`gh pr list --repo Danathar/openaudible-autoupdate`).
+**Blocked on:** the owner's review and merge.
 **Watch:** the hook's stubs-on-`PATH` exemption needs a committed directory
-`tests/<dir>` holding executable `sudo`, `dnf` and `rpm`. The foundation PR
-(#54) does not have one: its bats helpers build stubs in `$BATS_TEST_TMPDIR`
-at run time, and `bats` never names the script on the command line. Its e2e
-test runs through `tests/e2e/run.sh` in `podman run`. Both pass the hook, but
-the hook allows container runs of the updater only when the command contains a
-`tests/e2e` path. So the stubs exemption only matters for a hand-run
-`PATH=tests/<dir>:$PATH ./openaudible-autoupdate.sh`, which no file in #54
-sets up.
+`tests/<dir>` holding executable `sudo`, `dnf` and `rpm`, named by an absolute
+or `$CLAUDE_PROJECT_DIR`-anchored `PATH` entry. Nothing in `main` provides one:
+the bats helpers build stubs in `$BATS_TEST_TMPDIR` at run time and the e2e
+test runs through `tests/e2e/run.sh` in a container. So the exemption is
+unused today; remove `stubsDirOk` and its tests if nobody wants it.
 
 ## Open threads
 
 - `guard-bash.mjs` is a guard against careless commands, not a sandbox (threat
-  model at the top of the file). `podman run`/`docker run` are allowed without
-  inspecting their arguments, so a run that mounts the host's root or is
-  `--privileged` is not caught.
+  model at the top of the file). For `podman`/`docker run` it checks only that
+  a run naming the updater also names a `tests/e2e` path, and refuses
+  `exec`/`attach`; `--privileged` or a host-root bind mount is not checked, and
+  any argument that merely contains `tests/e2e` satisfies the exemption.
 
 ## Next steps
 
-1. Owner reviews and merges #51-#56 and the learning PR; then a handoff PR
-   rewrites this file from `origin/main`.
-2. Decide whether the hook's committed-stubs-directory exemption is still
-   wanted (see "Watch"); if not, remove `stubsDirOk` and its tests.
+1. Owner reviews and merges the learning PR; then a handoff PR rewrites this
+   file from `origin/main`.
+2. Decide whether to keep the stubs-directory exemption (see "Watch").

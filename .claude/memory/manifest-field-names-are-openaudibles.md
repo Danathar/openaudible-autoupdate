@@ -7,15 +7,15 @@ script or fixtures, or inventing fields (a `url`, a `checksum`) that the real
 manifest does not have.
 **Right:** the script reads OpenAudible's published manifest
 (`VERSION_URL`, default `https://openaudible.org/downloads/swt_version.json`,
-`openaudible-autoupdate.sh:11`). The fields it uses are, with the line that
+`openaudible-autoupdate.sh:11` at `56c0b3f`). The fields it uses are, with the line that
 reads each:
 
 | Field | Line | Notes |
 |---|---|---|
-| `.version` | 38 | top-level release version string |
-| `.download_dir` | 39 | base URL ending in `/`; the script concatenates `${download_dir}${file_name}` (line 56) |
-| `.platforms[$k].file` | 40 | file name only, not a URL |
-| `.platforms[$k].sha256` | 41 | hex digest |
+| `.version` | 40 | top-level release version string |
+| `.download_dir` | 41 | base URL ending in `/`; the script concatenates `${download_dir}${file_name}` (line 58) |
+| `.platforms[$k].file` | 42 | file name only, not a URL |
+| `.platforms[$k].sha256` | 43 | hex digest |
 
 `$k` is `PLATFORM_KEY`, default `linux_x86_64_rpm` (line 13). The manifest on
 2026-10-09 had these keys under `platforms`: `win_x86_64`,
@@ -28,6 +28,6 @@ print the string `null`, which the script checks for `file` only (line 43), not
 for `version` or `sha256`.
 **Why it matters:** a fixture that invents its own field names passes tests
 against code that then fails on the real manifest.
-**Evidence:** `openaudible-autoupdate.sh:11,13,38-46,56`; the live manifest at
+**Evidence:** `openaudible-autoupdate.sh:11,13,40-48,58` at `56c0b3f`; the live manifest at
 https://openaudible.org/downloads/swt_version.json (read 2026-10-09, version
-5.0.1); README lines 16-18.
+5.0.1); README "How it works" step 2.

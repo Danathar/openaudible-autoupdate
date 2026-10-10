@@ -38,9 +38,9 @@ enforces this. Pull requests, issues and comments go to
 ```
 
 Evidence must be something a reader can open. A claim that cannot be checked
-against a commit, a PR or a file does not get an entry. Line numbers are
-against the commit named in the entry; the script has not changed since the
-first commit `6caac1b`, but re-check before relying on them.
+against a commit, a PR or a file does not get an entry. Line numbers name the
+commit they were read at (`git show <commit>:openaudible-autoupdate.sh`); the
+script changed in `a8758f5` and `56c0b3f`, so re-check before relying on them.
 
 ## When to add and retire
 
@@ -57,7 +57,7 @@ first commit `6caac1b`, but re-check before relying on them.
 
 | Entry | One line |
 |---|---|
-| [log-and-list-under-set-e](log-and-list-under-set-e.md) | `log()` ends in `cmd && cmd`; under `set -e` it exits 1 when `systemd-cat` is missing |
+| [log-and-list-under-set-e](log-and-list-under-set-e.md) | Fixed in `a8758f5`: `log()` used to end in `cmd && cmd`, which exits 1 under `set -e` when `systemd-cat` is missing; do not reintroduce it |
 | [never-run-updater-on-host](never-run-updater-on-host.md) | The script installs an rpm with `sudo dnf install -y`; test with stubs or a container |
 | [checksum-before-install](checksum-before-install.md) | The sha256 comparison must stay before the install, and a mismatch must abort |
 | [manifest-field-names-are-openaudibles](manifest-field-names-are-openaudibles.md) | `version`, `download_dir`, `platforms.<key>.file`/`.sha256` belong to OpenAudible's manifest; do not rename or invent fields |

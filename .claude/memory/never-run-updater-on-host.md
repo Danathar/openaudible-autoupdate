@@ -5,17 +5,19 @@
 or through `distrobox enter ... --`) "to see what it does". No incident is
 recorded in the history; the hazard is built into the script.
 **Right:** the script's last real action is `sudo dnf install -y "$rpm_path"`
-(`openaudible-autoupdate.sh:68`), after it has downloaded an rpm from the URL
-in OpenAudible's manifest (line 56). On a machine that has the OpenAudible rpm
+(`openaudible-autoupdate.sh:70` at `56c0b3f`), after it has downloaded an rpm from
+the URL in OpenAudible's manifest (line 58). On a machine that has the OpenAudible rpm
 installed that is a real package upgrade with `sudo`. To exercise the script:
 
 - unit tests: `bats tests/unit` (added by `Danathar/openaudible-autoupdate#54`)
   runs the script with only stub `sudo`, `dnf`, `rpm`, `curl`... on `PATH`,
-  built in a temp directory; a hand run needs the same: a stubs directory
-  under `tests/` first on `PATH` that holds executable `sudo`, `dnf`, `rpm`,
-  which is all the hook accepts;
+  built in a temp directory; a hand run needs the same: an absolute stubs
+  directory under `tests/` first on `PATH` that holds executable `sudo`,
+  `dnf`, `rpm`, which is all the hook accepts;
 - end to end: `podman run` / `docker run` a throwaway container
-  (`tests/e2e/`, added by `Danathar/openaudible-autoupdate#54`);
+  (`tests/e2e/run.sh`, added by `Danathar/openaudible-autoupdate#54`); the hook
+  allows a container run of the updater only when the command names a
+  `tests/e2e` path;
 - syntax and lint only: `bash -n openaudible-autoupdate.sh`,
   `shellcheck openaudible-autoupdate.sh`.
 
@@ -29,7 +31,7 @@ undone by reverting a commit. The exit code of a dry run tells you nothing
 either: with the `log()` bug (see
 [log-and-list-under-set-e](log-and-list-under-set-e.md)) the script can die
 before it reaches the install.
-**Evidence:** `openaudible-autoupdate.sh:23-25` (it requires `sudo` and `dnf`),
-`:56`, `:68`; `.claude/hooks/guard-bash.mjs` (header comment lists the exact
-exemptions) and `.claude/hooks/tests/guard-bash.test.mjs`; README lines 38-53
+**Evidence:** `openaudible-autoupdate.sh:25-27` (it requires `sudo` and `dnf`), `:58`, `:70`
+at `56c0b3f`; `.claude/hooks/guard-bash.mjs` (header comment lists the exact
+exemptions) and `.claude/hooks/tests/guard-bash.test.mjs`; README "Install" section
 (the install steps that enable the timer).
