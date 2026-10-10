@@ -1,0 +1,13 @@
+{
+    "$comment": "Tunable QA rules. coverage.* is read by scripts/auto-qa-tuner.mjs (.github/workflows/auto-qa.yml); nightly.* is read by .github/workflows/nightly-compliance.yml. Tuning never lowers a floor automatically and never commits: raises are proposed in a tracking issue and applied by a human.",
+    "coverage": {
+        "raise_floor_when_headroom_exceeds": 5,
+        "buffer_below_measured": 3,
+        "note": "Headroom is measured minus floor, in percentage points of kcov line coverage. When it exceeds raise_floor_when_headroom_exceeds the proposed floor is floor(measured - buffer_below_measured); it is never above that and never below the current floor."
+    },
+    "nightly": {
+        "manifest_url": "https://openaudible.org/downloads/swt_version.json",
+        "platform_key": "linux_x86_64_rpm",
+        "note": "The upstream-contract check fetches manifest_url and verifies the fields openaudible-autoupdate.sh reads (version, download_dir, platforms[platform_key].file and .sha256). It never downloads the rpm. manifest_url and platform_key mirror the defaults of VERSION_URL and PLATFORM_KEY in the script."
+    }
+}

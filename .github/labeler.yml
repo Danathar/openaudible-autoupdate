@@ -1,0 +1,45 @@
+# Path to label map for actions/labeler v5 (.github/workflows/labeler.yml).
+# Labels that do not exist yet are created by the labeler on first use (with
+# the default colour and no description); create them by hand first to set both.
+
+'area/script':
+  - changed-files:
+      - any-glob-to-any-file: 'openaudible-autoupdate.sh'
+
+'area/systemd':
+  - changed-files:
+      - any-glob-to-any-file: 'systemd/**'
+
+'area/tests':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'tests/**'
+          - 'scripts/tests/**'
+          - '.claude/hooks/tests/**'
+
+'area/ci':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
+          - 'scripts/**'
+          - '.shellcheckrc'
+          - '.editorconfig'
+          - '.coverage-thresholds.json'
+          - 'risk-config.json'
+
+'area/docs':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**'
+          - '*.md'
+
+'area/agents':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.claude/**'
+          - '.cursor/**'
+          - 'AGENTS.md'
+          - 'CLAUDE.md'
+          - '.github/copilot-instructions.md'
+          - '.github/prompts/**'
+          - 'policies/**'
