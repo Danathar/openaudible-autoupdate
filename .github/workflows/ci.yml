@@ -1,0 +1,98 @@
+name: CI
+
+# Runs on every pull request and every push to main (no path filters, so the
+# required checks always report). Job display names below are what branch
+# protection / the ruleset refer to.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint (shellcheck)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install pinned shellcheck
+        # The runner image's shellcheck version drifts; pin a release so lint
+        # results are the same locally and in CI.
+        env:
+          SHELLCHECK_VERSION: v0.11.0
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/shellcheck.tar.xz" \
+            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  $RUNNER_TEMP/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/shellcheck-${SHELLCHECK_VERSION}" >> "$GITHUB_PATH"
+
+      - name: shellcheck (script, tests, e2e)
+        # Config comes from .shellcheckrc. Stub scripts embedded in
+        # tests/unit/helpers.bash are heredocs and are exercised by the tests.
+        run: |
+          shellcheck --version
+          git ls-files -z '*.sh' '*.bash' '*.bats' | xargs -0 shellcheck
+
+  unit:
+    name: Unit tests (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu bash
+            container: ''
+          - name: fedora container
+            container: registry.fedoraproject.org/fedora:latest
+    # An empty string runs the job directly on the runner.
+    container: ${{ matrix.container }}
+    steps:
+      - name: Install bats and tools (ubuntu)
+        if: matrix.container == ''
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats jq
+
+      - name: Install bats and tools (fedora)
+        if: matrix.container != ''
+        run: dnf install -y -q bats jq gawk git
+
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Run bats unit tests
+        run: |
+          bats --version
+          bats --tap tests/unit
+
+  e2e:
+    name: E2E (fedora container)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: registry.fedoraproject.org/fedora:latest
+    steps:
+      - name: Install git
+        run: dnf install -y -q git
+
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Run end-to-end test
+        # Builds two dummy rpms, serves them locally, runs the real script and
+        # a real `dnf install` inside this throwaway job container.
+        env:
+          SRC: ${{ github.workspace }}
+        run: bash tests/e2e/in-container.sh
