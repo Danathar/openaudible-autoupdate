@@ -135,7 +135,7 @@ the comments in [`systemd/`](../systemd)).
       (`distrobox enter <name> -- %h/bin/openaudible-autoupdate.sh`), not in
       the script.
 - [ ] **Dependencies.** A new external command is added to the dependency check
-      loop (`curl jq rpm sudo dnf sha256sum` today) or guarded with
+      loop (`curl jq rpm sudo dnf sha256sum awk` today) or guarded with
       `command -v`, and is available in a minimal container. Optional helpers
       (`systemd-cat`, `notify-send`) are guarded and their absence is not an
       error.

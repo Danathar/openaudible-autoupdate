@@ -80,11 +80,10 @@ days. It has read-only permissions and commits nothing. Runs are listed at
 
 ## How to read the numbers
 
-- **A high acceptance rate is not a quality signal here.** Nearly every PR is
-  opened and merged by the same person, so a high rate says who opens PRs, not
-  how good they are. It only becomes informative for classes with an
-  independent decider: watch the Hive app row. A Hive PR that is closed
-  unmerged is the useful event.
+- **Acceptance rate measures decisions, not quality.** It counts how often a
+  decided PR was merged rather than closed. It only becomes informative for a
+  class whose PRs are decided by someone other than their author: watch the
+  Hive app row. A Hive PR that is closed unmerged is the useful event.
 - **Time to merge** measures how long the owner took to review, plus CI time.
   Short medians mean small PRs and fast review, not low rigor. Read the p90
   for the slow tail, and read neither without the sample size in the JSON
