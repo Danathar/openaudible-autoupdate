@@ -98,14 +98,16 @@ script's behavior. Line numbers are for `openaudible-autoupdate.sh` at
    16 does not clean it up. A `file` with a `/` and no `..` fails the download
    because the subdirectory does not exist. The checksum comparison does not
    protect against this: the file is written before it runs, and the expected
-   hash comes from the same manifest. Impact is bounded (a file named `*.rpm`
-   chosen by whoever controls the manifest, written as the invoking user), but
-   the fix is one line: reject any `file` that is not a plain basename (for
+   hash comes from the same manifest. The script never requires a `.rpm`
+   suffix (only `null`/empty is rejected, lines 40-43), so a traversal can
+   create or overwrite any file the invoking user can write, not only an rpm,
+   with content chosen by whoever controls the manifest. The fix is one line: reject any `file` that is not a plain basename (for
    example `[[ "$file_name" == */* || "$file_name" == .* ]]`) before line 55.
 2. **No signature check on the local package.** `dnf install` of a local file
    runs with `localpkg_gpgcheck`, whose documented default is `False` (`man
    dnf.conf`, DNF5 on this host). So the trust root is TLS to `openaudible.org`
-   plus the sha256 from the same JSON. An attacker who can alter the manifest
+   plus the sha256 from the same JSON. The checksum detects a corrupted or
+   swapped download; it does not authenticate the publisher. An attacker who can alter the manifest
    can supply a package and its hash together. Pinning the vendor's signing key
    and enabling `--setopt=localpkg_gpgcheck=1` would add a second root, if
    OpenAudible signs its rpms; that is a design decision for the owner, and an

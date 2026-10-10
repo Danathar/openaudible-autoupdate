@@ -20,14 +20,14 @@ directory level.
 
 | Tier | Name | Covers | Required commands | Review |
 | ---- | ---- | ------ | ----------------- | ------ |
-| 1 | critical | `.github/workflows/**`, `.github/CODEOWNERS`, `.github/rulesets/**`, `.claude/settings.json`, `.claude/hooks/**`, `policies/**`, `scripts/check-policies.mjs`, `risk-config.json`, `LICENSE`, `AGENTS.md` | `shellcheck openaudible-autoupdate.sh`, `bats tests/unit`, `node scripts/check-policies.mjs`, `node --test scripts/tests/*.test.mjs` | `owner` |
+| 1 | critical | `.github/workflows/**`, `.github/CODEOWNERS`, `.github/rulesets/**`, `.claude/settings.json`, `.claude/hooks/**`, `policies/**`, `scripts/check-policies.mjs`, `risk-config.json`, `LICENSE`, `AGENTS.md` | `shellcheck openaudible-autoupdate.sh`, `bats tests/unit`, `tests/e2e/run.sh`, `node scripts/check-policies.mjs`, `node --test scripts/tests/*.test.mjs` | `owner` |
 | 2 | high | `openaudible-autoupdate.sh`, `systemd/**`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/**`, `.github/prompts/**`, `.claude/skills/**`, `docs/risk-tiers.md`, `docs/agent-boundaries.md`, `docs/security/**` | `shellcheck openaudible-autoupdate.sh`, `bats tests/unit`, `node scripts/check-policies.mjs` | `owner` |
 | 3 | medium | `tests/**`, `scripts/**`, `.shellcheckrc`, `.coverage-thresholds.json` | `bats tests/unit`, `node --test scripts/tests/*.test.mjs` | `ci` |
 | 4 | low | `docs/**`, `*.md`, `.editorconfig`, `.gitignore` | none | `ci` |
 
 Review values: `owner` means the repository owner (Danathar) reads the diff and
 merges it, and a green CI run alone is not enough. `ci` means the required CI
-checks (the jobs in `.github/workflows/ci.yml`) must pass, and an agent may
+checks (the jobs in `.github/workflows/ci.yml`: `Lint (shellcheck)`, `Unit tests (ubuntu bash)`, `Unit tests (fedora container)`, `E2E (fedora container)`; plus `Coverage gate`) must pass, and an agent may
 open and, under the Hive merge strategy, queue the pull request.
 
 ## The install path is Tier 1
@@ -54,9 +54,11 @@ path is the reviewer's judgment, so a Tier 1 change to it states in the PR what
 was checked. See [AI security policy](security/SECURITY-AI.md), section "The
 install path".
 
-The rest of the script (logging, notifications, version comparison, the
-"not installed" early exit) and `systemd/**` (what runs the script and when) are
-Tier 2.
+The rest of the script (logging, notifications, the "not installed" early
+exit) and `systemd/**` (what runs the script and when) are Tier 2. Path
+matching is whole-file, so this split is a reviewer rule, not something the
+checker or CODEOWNERS can see: every change to the script gets owner review
+regardless.
 
 ## How to apply it
 
@@ -69,10 +71,10 @@ Tier 2.
    says: the install path rule above; a "docs" change that edits the example
    `systemd` unit or a command users copy and run; a test change that stubs out
    the checksum comparison.
-5. Run every command in the tier's Required column. A pull request that spans
-   tiers meets the requirements of its highest tier. The container end-to-end
-   tests under `tests/e2e/` are part of CI and are not in the table because
-   they need a container runtime.
+5. Run every command in the tier's Required column. `shellcheck` in CI also covers `tests/`; locally run it on the files you changed. A pull request that spans
+   tiers meets the requirements of its highest tier. `tests/e2e/run.sh` needs a
+   container runtime; if you have none, say so in the PR and rely on the
+   `E2E (fedora container)` job.
 
 `node scripts/check-policies.mjs --classify <path> ...` prints the tier the
 path table assigns to each path. It does not apply the install-path rule.
@@ -104,8 +106,7 @@ path table assigns to each path. It does not apply the install-path rule.
 ## Pull request notes by tier
 
 - Tier 1 and Tier 2: state in the PR body which of the required commands ran
-  and what they printed, and what could not be run (for example the container
-  end-to-end tests without a container runtime).
+  and what they printed, and what could not be run (for example `tests/e2e/run.sh` without a container runtime).
 - Tier 1 changes to a workflow: say what was verified and what could not be (a
   cron schedule cannot be proven before it fires).
 - Tier 1 changes to the install path: say how checksum verification, the
