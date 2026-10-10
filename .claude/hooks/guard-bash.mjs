@@ -1,0 +1,1178 @@
+#!/usr/bin/env node
+// PreToolUse hook for Claude Code's Bash tool (wired up in .claude/settings.json).
+//
+// Threat model: this hook prevents an agent that is following instructions
+// from carelessly or accidentally (a) writing to the wrong GitHub repository,
+// (b) running destructive git commands, or (c) running the real updater,
+// `sudo`, or a package-manager install/upgrade on the developer's machine. It
+// is NOT a sandbox against deliberate obfuscation (eval of built strings,
+// shell variables, scripts written to disk and executed, aliases, ...). The
+// real boundaries are token scope / the Hive GitHub App's repository access
+// and review of the changes; findings that need deliberate obfuscation are out
+// of scope here.
+//
+// Why: openaudible-autoupdate.sh runs `sudo dnf install -y` on whatever
+// machine it runs on, and the developer's machine is an immutable
+// Fedora-based host with the real OpenAudible rpm installed. Running the
+// script "to see what happens" would install a package for real. And a bare
+// `gh` write in a clone resolves its target from git remotes or gh's default,
+// which is how an agent files issues or PRs on the wrong repository.
+//
+// Protocol (https://docs.anthropic.com/en/docs/claude-code/hooks): the hook
+// receives JSON on stdin ({ tool_name, tool_input: { command } }). Exit 0 lets
+// the call proceed; exit 2 blocks it and feeds stderr back to the model.
+//
+// What is blocked (fail closed when unsure):
+//   GitHub / git
+//   - gh pr|issue|discussion|release|workflow|run|label|repo|secret|variable|
+//     ruleset|cache subcommands that are not read-only and do not target
+//     Danathar/openaudible-autoupdate via --repo/-R or a GH_REPO= prefix; a
+//     write whose arguments name a github.com URL of another repository.
+//   - gh api with a mutating method (or -f/-F/--input body) against anything
+//     outside repos/Danathar/openaudible-autoupdate; GraphQL mutations.
+//   - git push with force, --mirror, a remote other than `origin`, a URL
+//     remote, or no explicit remote.
+//   - git config / git remote changes that re-point `origin` or push URLs.
+//   Updater and host-modifying commands
+//   - Executing openaudible-autoupdate.sh (or the installed
+//     `openaudible-autoupdate` name): directly, via bash/sh/zsh/dash, source,
+//     `.`, env/timeout/xargs/other wrappers, systemd-run, or via
+//     `distrobox enter` / `toolbox run`. The only exemptions are:
+//       1. the e2e harness: `podman run ...` / `docker run ...` with a
+//          `tests/e2e` path (the script then runs against the container's own
+//          throwaway rpm database), and
+//       2. an inline `PATH=<dir>[:...]` (or `export PATH=...`) whose FIRST
+//          entry is an absolute path (or `$CLAUDE_PROJECT_DIR/...`) inside
+//          the project under a `tests/<dir>` component, contains no `..`,
+//          and holds executable stubs for `sudo`, `dnf` and `rpm` (checked on
+//          disk). Relative entries never qualify: the shell resolves them
+//          against its own cwd. Stubs shadow the real commands, so nothing
+//          is installed.
+//     `distrobox enter` / `toolbox run|enter` / `distrobox-enter` are refused
+//     outright: they enter the developer's real long-lived container.
+//     `podman exec` / `docker exec` are refused for the same reason (distrobox
+//     containers are podman containers). A `podman|docker run` whose arguments
+//     mention the updater is allowed only when they also contain a
+//     `tests/e2e` path. `sh -n` / `bash -n` (syntax check) and tools that merely
+//     read the file (shellcheck, cat, grep, bats, ...) are fine.
+//   - sudo / doas / pkexec / run0 / su in any position of a wrapper chain,
+//     including behind systemd-run and flatpak-spawn.
+//   - dnf/dnf5/yum/microdnf subcommands other than read-only queries (list,
+//     info, search, repoquery, provides, check-update, repolist, ...).
+//   - rpm install/upgrade/freshen/erase modes (-i -U -F -e and long forms),
+//     refused even when a query flag is also present; plain query (-q, -qi),
+//     verify (-V) and checksig (-K) are fine.
+//   - rpm-ostree / bootc / pkcon subcommands other than read-only ones
+//     (rpm-ostree: status, db; bootc: status; pkcon: search, get-*, ...). On
+//     an Aurora/Bluefin host `rpm-ostree install` layers packages.
+//   - systemctl enable/start/restart/link/... of anything named
+//     openaudible-autoupdate*, with or without --user.
+//
+// Parsing notes: redirections (`>log`, `2>&1`, `&>f`, `<file`) end the word
+// and are not arguments, so `./openaudible-autoupdate.sh>log` is still the
+// script. A shell with no script operand that reads the updater on stdin
+// (`cat openaudible-autoupdate.sh | bash`, `bash -s < openaudible-autoupdate.sh`,
+// `bash -c "$(cat openaudible-autoupdate.sh)"`) counts as running it. Quoted
+// heredoc bodies are data. Wrappers (env, timeout, xargs, ...) are looked
+// through to the command they run, not to a later argument. Deliberate
+// obfuscation (variables, built strings, scripts written then run) stays out of scope.
+//
+// Read-only gh commands (view, list, status, diff, checks, api GET, ...) are
+// always allowed. The command is split into segments on && || ; | & newlines,
+// subshells and command substitutions; shell -c / eval strings are analysed
+// recursively. Quoted text is data, so a quoted "sudo" or script name inside
+// an `echo` or a read-only command is fine.
+
+import { basename, join, isAbsolute, resolve } from 'node:path';
+import { readFileSync, accessSync, realpathSync, constants as fsConstants } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+export const REPO = 'danathar/openaudible-autoupdate';
+export const SCRIPT = 'openaudible-autoupdate';
+
+// Shell redirection operators (`>`, `>>`, `>&`, `>|`, `&>`, `&>>`, `<`, `<&`, `<>`, `<<<`; `<<` heredocs are handled separately).
+const REDIRECT = /^(?:&>>?|<<<|<&|<>|>>|>&|>\||<|>)/;
+
+const GUIDANCE =
+    'Hard rules for this repository: never run openaudible-autoupdate.sh, sudo or a package install on the host ' +
+    '(it runs `sudo dnf install -y`); test it only with stubs on PATH (tests/) or the tests/e2e container harness. ' +
+    'GitHub writes go to Danathar/openaudible-autoupdate (add `--repo Danathar/openaudible-autoupdate`), ' +
+    'and git pushes only to `origin`.';
+
+// gh command groups whose non-read actions mutate a repository.
+// Value = actions that are read-only (or purely local) and need no --repo.
+const GH_GROUPS = {
+    pr: ['view', 'list', 'status', 'diff', 'checks', 'checkout'],
+    issue: ['view', 'list', 'status'],
+    release: ['view', 'list', 'download', 'verify', 'verify-asset'],
+    workflow: ['view', 'list'],
+    run: ['view', 'list', 'watch', 'download'],
+    label: ['list'],
+    repo: ['view', 'list', 'clone', 'gitignore', 'license'],
+    secret: ['list'],
+    variable: ['list', 'get'],
+    ruleset: ['list', 'view', 'check'],
+    cache: ['list'],
+    discussion: ['view', 'list'],
+    codespace: ['list', 'view', 'logs', 'ports'],
+};
+
+// gh groups outside GH_GROUPS that may run without a repo target.
+// true = every action is read-only or local; array = only those actions.
+const GH_OTHER_READONLY = {
+    auth: ['status'],
+    browse: true,
+    search: true,
+    status: true,
+    config: ['get', 'list'],
+    alias: ['list'],
+    extension: ['list', 'search', 'browse'],
+    'ssh-key': ['list'],
+    'gpg-key': ['list'],
+    org: ['list'],
+    project: ['list', 'view', 'field-list', 'item-list'],
+    attestation: ['verify', 'inspect', 'trusted-root'],
+    completion: true,
+    help: true,
+    version: true,
+};
+
+// Words that may precede the real command and carry no meaning for us.
+const KEYWORDS = new Set(['{', '}', '!', 'if', 'then', 'else', 'elif', 'do', 'while', 'until', 'time']);
+// Wrappers that run another command; we look through them for gh/git/shells.
+const WRAPPERS = new Set([
+    'env', 'command', 'builtin', 'exec', 'nohup', 'sudo', 'nice', 'xargs',
+    'timeout', 'setsid', 'stdbuf', 'ionice', 'chronic',
+]);
+const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash']);
+
+// ---------------------------------------------------------------------------
+// Tokenizer
+// ---------------------------------------------------------------------------
+
+/**
+ * Split a shell command line into segments of words.
+ * Quotes and backslashes are resolved; operators and parentheses end a segment;
+ * heredoc bodies are skipped. This is a deliberately small approximation of
+ * shell parsing, good enough to find command names and their flags.
+ */
+export function tokenize(input) {
+    const segments = [];
+    let words = [];
+    let word = null; // null = no word in progress ('' = empty quoted word)
+    const pendingHeredocs = [];
+
+    let skip = null; // 'in' | 'out': the next word is a redirection target
+    let stdinFrom; // target of `< file` for the current segment
+    let hereString; // word of `<<< word` for the current segment
+    let pendingPipe = null; // previous segment when this one is the right side of `|`
+    const endWord = () => {
+        if (word !== null) {
+            if (skip === 'in') stdinFrom = word;
+            else if (skip === 'here') hereString = word;
+            else if (skip === null) words.push(word);
+            skip = null;
+        }
+        word = null;
+    };
+    const endSegment = (pipe = false) => {
+        endWord();
+        skip = null;
+        if (words.length || stdinFrom !== undefined) {
+            words.stdinFrom = stdinFrom;
+            words.hereString = hereString;
+            words.pipedFrom = pendingPipe;
+            segments.push(words);
+            pendingPipe = pipe ? words : null;
+        }
+        stdinFrom = undefined;
+        hereString = undefined;
+        words = [];
+    };
+    const append = (ch) => {
+        word = (word ?? '') + ch;
+    };
+
+    let i = 0;
+    while (i < input.length) {
+        const c = input[i];
+
+        if (c === "'") {
+            const end = input.indexOf("'", i + 1);
+            const stop = end === -1 ? input.length : end;
+            append(input.slice(i + 1, stop));
+            i = stop + 1;
+        } else if (c === '"') {
+            i++;
+            append('');
+            while (i < input.length && input[i] !== '"') {
+                if (input[i] === '$' && input[i + 1] === '(') {
+                    // A substitution body may contain quotes of its own; it is analysed separately.
+                    // Its text stays in the word (a `bash -c "$(cat x)"` script is re-analysed from it).
+                    const end = closeParen(input, i + 2);
+                    append(input.slice(i, end));
+                    i = end;
+                    continue;
+                }
+                if (input[i] === '\\' && i + 1 < input.length) {
+                    const next = input[i + 1];
+                    if ('"\\$`'.includes(next)) i++;
+                    else if (next === '\n') {
+                        i += 2;
+                        continue;
+                    }
+                }
+                append(input[i]);
+                i++;
+            }
+            i++;
+        } else if (c === '\\') {
+            if (input[i + 1] === '\n') {
+                i += 2; // line continuation
+            } else {
+                append(input[i + 1] ?? '');
+                i += 2;
+            }
+        } else if (c === '#' && word === null) {
+            while (i < input.length && input[i] !== '\n') i++; // comment
+        } else if (c === '\n') {
+            endSegment();
+            i++;
+            // Skip the bodies of heredocs started on the line that just ended.
+            // The body is kept on the segment that started the heredoc: a shell
+            // reading it runs it, so it is analysed as a command line.
+            while (pendingHeredocs.length) {
+                const { delim, seg } = pendingHeredocs.shift();
+                const bodyStart = i;
+                let bodyEnd = input.length;
+                while (i < input.length) {
+                    let eol = input.indexOf('\n', i);
+                    if (eol === -1) eol = input.length;
+                    const lineStart = i;
+                    const line = input.slice(i, eol).replace(/^\t+/, '');
+                    i = eol + 1;
+                    if (line === delim) {
+                        bodyEnd = lineStart;
+                        break;
+                    }
+                }
+                seg.heredocBody = (seg.heredocBody ?? '') + input.slice(bodyStart, bodyEnd);
+            }
+        } else if (c === '<' && input[i + 1] === '<' && input[i + 2] !== '<') {
+            i += 2;
+            if (input[i] === '-') i++;
+            while (input[i] === ' ' || input[i] === '\t') i++;
+            let delim = '';
+            let quote = null;
+            while (i < input.length) {
+                const d = input[i];
+                if (quote) {
+                    if (d === quote) quote = null;
+                    else delim += d;
+                } else if (d === "'" || d === '"') quote = d;
+                else if (/[\s;&|()<>]/.test(d)) break;
+                else delim += d;
+                i++;
+            }
+            endWord();
+            if (delim) pendingHeredocs.push({ delim, seg: words });
+        } else if ((c === '<' || c === '>') && input[i + 1] === '(') {
+            // Process substitution `<(cmd)` / `>(cmd)`: an argument; its body is analysed separately.
+            append('/dev/fd/N');
+            i = closeParen(input, i + 2);
+        } else if ((c === '<' || c === '>' || c === '&') && REDIRECT.test(input.slice(i, i + 3))) {
+            // Redirections end the word and are not arguments: `./x.sh>log`, `2>&1`,
+            // `&>f`, `<file`. The target word is consumed (and remembered for `<`).
+            const op = REDIRECT.exec(input.slice(i, i + 3))[0];
+            if (word !== null && /^\d+$/.test(word)) word = null; // fd number: `2>`
+            endWord();
+            skip = op === '<<<' ? 'here' : op.startsWith('<') ? 'in' : 'out';
+            i += op.length;
+        } else if (c === ' ' || c === '\t') {
+            endWord();
+            i++;
+        } else if (c === '|') {
+            const dbl = input[i + 1] === '|';
+            endSegment(!dbl);
+            i += dbl || input[i + 1] === '&' ? 2 : 1;
+        } else if (c === '&' || c === ';' || c === '(' || c === ')') {
+            endSegment();
+            i++;
+        } else if (c === '`') {
+            // Substitution contents are analysed separately; the enclosing
+            // command line carries on after the closing backtick.
+            append('$()');
+            const end = input.indexOf('`', i + 1);
+            i = end === -1 ? input.length : end + 1;
+        } else if (c === '$' && input[i + 1] === '(') {
+            append('$()');
+            i = closeParen(input, i + 2);
+        } else {
+            append(c);
+            i++;
+        }
+    }
+    endSegment();
+    return segments;
+}
+
+/**
+ * Find the bodies of $(...) and `...` substitutions, including ones inside
+ * double quotes (but not single quotes), so they can be analysed as commands.
+ */
+export function extractSubstitutions(input) {
+    const found = [];
+    let inSingle = false;
+    let inDouble = false;
+    const pending = []; // heredocs started on the current line
+    for (let i = 0; i < input.length; i++) {
+        const c = input[i];
+        if (c === '\\' && !inSingle) {
+            i++;
+        } else if (c === "'" && !inDouble) {
+            inSingle = !inSingle;
+        } else if (c === '"' && !inSingle) {
+            inDouble = !inDouble;
+        } else if (!inSingle && !inDouble && c === '<' && input[i + 1] === '<' && input[i + 2] !== '<') {
+            const h = readHeredocStart(input, i);
+            if (h.delim) pending.push(h);
+            i = h.next - 1;
+        } else if (!inSingle && !inDouble && c === '\n' && pending.length) {
+            // A quoted heredoc body is data (Markdown backticks in a PR body are not
+            // commands). An unquoted body is expanded by the shell, so it is scanned.
+            while (pending.length && pending[0].quoted) i = skipHeredocBody(input, i + 1, pending.shift().delim) - 1;
+            pending.length = 0;
+        } else if (!inSingle && (c === '$' || (!inDouble && (c === '<' || c === '>'))) && input[i + 1] === '(') {
+            const j = closeParen(input, i + 2);
+            found.push(input.slice(i + 2, j - 1));
+            i = j - 1; // nested substitutions are found by the recursive analysis
+        } else if (!inSingle && c === '`') {
+            const end = input.indexOf('`', i + 1);
+            const stop = end === -1 ? input.length : end;
+            found.push(input.slice(i + 1, stop));
+            i = stop;
+        }
+    }
+    return found;
+}
+
+/**
+ * Index just past the `)` that closes a substitution whose body starts at `j`,
+ * ignoring parens in quotes, escaped, or in heredoc bodies.
+ */
+function closeParen(input, j) {
+    let depth = 1;
+    let q = null;
+    const inner = [];
+    for (; j < input.length && depth > 0; j++) {
+        const d = input[j];
+        if (d === '\\' && q !== "'") j++;
+        else if (q) {
+            if (d === q) q = null;
+        } else if (d === "'" || d === '"') q = d;
+        else if (d === '<' && input[j + 1] === '<' && input[j + 2] !== '<') {
+            const h = readHeredocStart(input, j);
+            if (h.delim) inner.push(h);
+            j = h.next - 1;
+        } else if (d === '\n' && inner.length) {
+            while (inner.length) j = skipHeredocBody(input, j + 1, inner.shift().delim) - 1;
+        } else if (d === '(') depth++;
+        else if (d === ')') depth--;
+    }
+    return j;
+}
+
+/** Parse `<<[-]['"]DELIM['"]` at input[i]; returns { delim, quoted, next } (next = index after it). */
+function readHeredocStart(input, i) {
+    i += 2;
+    if (input[i] === '-') i++;
+    while (input[i] === ' ' || input[i] === '\t') i++;
+    let delim = '';
+    let quote = null;
+    let quoted = false;
+    while (i < input.length) {
+        const d = input[i];
+        if (quote) {
+            if (d === quote) quote = null;
+            else delim += d;
+        } else if (d === "'" || d === '"') {
+            quote = d;
+            quoted = true;
+        } else if (d === '\\') {
+            quoted = true;
+            delim += input[i + 1] ?? '';
+            i++;
+        } else if (/[\s;&|()<>]/.test(d)) break;
+        else delim += d;
+        i++;
+    }
+    return { delim, quoted, next: i };
+}
+
+/** Index just past the line that closes a heredoc whose body starts at `i`. */
+function skipHeredocBody(input, i, delim) {
+    while (i < input.length) {
+        let eol = input.indexOf('\n', i);
+        if (eol === -1) eol = input.length;
+        const line = input.slice(i, eol).replace(/^\t+/, '');
+        i = eol + 1;
+        if (line === delim) break;
+    }
+    return i;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const isAssignment = (w) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(w);
+
+/** Normalise OWNER/REPO, HOST/OWNER/REPO, or a github URL to "owner/repo". */
+export function normalizeRepo(value) {
+    return String(value)
+        .trim()
+        .toLowerCase()
+        .replace(/^(?:https?:\/\/|git@|ssh:\/\/git@)?github\.com[/:]/, '')
+        .replace(/\.git$/, '')
+        .replace(/\/+$/, '');
+}
+
+/** True if a word is a github.com URL (or git@/ssh form) for a repository other than REPO. */
+export function namesOtherRepo(word) {
+    const m = /^(?:https?:\/\/|git@|ssh:\/\/git@)github\.com[/:]([^/\s]+\/[^/\s]+?)(?:\.git)?(?:\/.*)?$/i.exec(
+        String(word)
+    );
+    return m !== null && m[1].toLowerCase() !== REPO;
+}
+
+function isTarget(value) {
+    return normalizeRepo(value) === REPO;
+}
+
+/**
+ * Extract the effective --repo/-R value from gh args, or null. gh honours the
+ * LAST repeated flag, so a fork flag followed by another repo must not pass:
+ * if any value is not the fork, that one is returned; otherwise the last.
+ */
+function repoFlag(args) {
+    const values = [];
+    for (let i = 0; i < args.length; i++) {
+        const a = args[i];
+        if (a === '--repo' || a === '-R') values.push(args[++i] ?? '');
+        else if (a.startsWith('--repo=')) values.push(a.slice(7));
+        else if (a.startsWith('-R') && a.length > 2 && !a.startsWith('--')) values.push(a.slice(2));
+    }
+    if (!values.length) return null;
+    return values.find((v) => !isTarget(v)) ?? values[values.length - 1];
+}
+
+const block = (reason) => ({ blocked: true, reason: `${reason}\n${GUIDANCE}` });
+
+// ---------------------------------------------------------------------------
+// gh
+// ---------------------------------------------------------------------------
+
+function checkGhApi(args) {
+    let method = null;
+    let hasBody = false;
+    const positionals = [];
+    for (let i = 0; i < args.length; i++) {
+        const a = args[i];
+        if (a === '-X' || a === '--method') method = (args[++i] ?? '').toUpperCase();
+        else if (a.startsWith('--method=')) method = a.slice(9).toUpperCase();
+        else if (/^-X./.test(a)) method = a.slice(2).toUpperCase();
+        else if (['-f', '-F', '--field', '--raw-field', '--input'].includes(a)) {
+            hasBody = true;
+            i++;
+        } else if (/^--(field|raw-field|input)=/.test(a) || /^-[fF]./.test(a)) hasBody = true;
+        else if (['-H', '--header', '--hostname', '-q', '--jq', '-t', '--template', '--cache'].includes(a)) i++;
+        else if (!a.startsWith('-')) positionals.push(a);
+    }
+    const endpoint = (positionals[0] ?? '').replace(/^\/+/, '');
+    const mutating = method ? !['GET', 'HEAD'].includes(method) : hasBody;
+    const isGraphql = endpoint.toLowerCase() === 'graphql';
+
+    if (isGraphql) {
+        // GraphQL is always POST; allow queries, refuse mutations (target unknowable).
+        if (args.some((a) => /\bmutation\b/i.test(a))) {
+            return block('Blocked: `gh api graphql` mutation. The target repository cannot be verified.');
+        }
+        // The query must be a visible literal: a body from a file/stdin (--input,
+        // query=@file) or a shell variable could hide a mutation.
+        const query = args.map((a) => /^query=([\s\S]*)$/.exec(a)).find(Boolean);
+        const opaque =
+            args.some((a) => a === '--input' || a.startsWith('--input=')) ||
+            !query ||
+            /^[@$]/.test(query[1]);
+        if (opaque) {
+            return block('Blocked: `gh api graphql` without an inline literal `-f query=...`; the request cannot be inspected for mutations.');
+        }
+        return null;
+    }
+    if (!mutating) return null;
+
+    // `{owner}/{repo}` placeholders resolve to gh's default repo, which may be a different repository.
+    const m = /^repos\/([^/]+\/[^/?#]+)(?:[/?#]|$)/i.exec(endpoint);
+    if (m && m[1].toLowerCase() === REPO) return null;
+
+    return block(
+        `Blocked: mutating \`gh api\` call (${method ?? 'implicit POST'}) to "${endpoint || '?'}"; ` +
+            'only paths under repos/Danathar/openaudible-autoupdate are allowed.'
+    );
+}
+
+function checkGh(args, envRepo) {
+    // Locate group and action (first two non-flag words).
+    // The value of --repo/-R is not a command word, wherever the flag sits
+    // (`gh -R chrisvel/tududi pr create` must still resolve to group "pr").
+    const plain = args.filter((a, n) => !a.startsWith('-') && !['--repo', '-R'].includes(args[n - 1]));
+    const group = plain[0];
+    if (!group) return null;
+
+    if (group === 'api') return checkGhApi(args.slice(args.indexOf('api') + 1));
+    if (!Object.hasOwn(GH_GROUPS, group)) {
+        // Fail closed: groups outside GH_GROUPS pass only via the explicit
+        // read-only allowlist (GH_OTHER_READONLY). This also covers `gh alias set`,
+        // which could define an alias that hides a write.
+        const allowed = GH_OTHER_READONLY[group];
+        if (allowed === true || (Array.isArray(allowed) && allowed.includes(plain[1] ?? ''))) return null;
+        return block(
+            `Blocked: \`gh ${group} ${plain[1] ?? ''}\` is not on the read-only allowlist ` +
+                '(unknown or mutating gh command; the target repository cannot be verified).'
+        );
+    }
+
+    const action = plain[1] ?? '';
+    const flagRepo = repoFlag(args);
+    const target = flagRepo ?? envRepo;
+
+    if (group === 'repo' && action === 'set-default') {
+        const rest = plain.slice(2);
+        if (args.includes('--view') || args.includes('-v')) return null;
+        if (rest.length === 1 && isTarget(rest[0])) return null;
+        return block('Blocked: `gh repo set-default` must be `gh repo set-default Danathar/openaudible-autoupdate` (or --view).');
+    }
+
+    if (GH_GROUPS[group].includes(action)) return null; // read-only
+
+    // A write whose arguments name another repository's github.com URL
+    // (`gh pr merge https://github.com/other/x/pull/1`): gh uses the URL, not
+    // --repo, so it is refused even when --repo points at this repository.
+    const other = args.find(namesOtherRepo);
+    if (other !== undefined) {
+        return block(`Blocked: \`gh ${group} ${action}\` names another repository ("${other}").`);
+    }
+
+    if (group === 'repo') {
+        // Repo-scoped writes take the repo as a positional argument.
+        const positional = plain.slice(2);
+        if (isTarget(flagRepo ?? '') || (positional.length && isTarget(positional[0])) || isTarget(envRepo ?? '')) return null;
+        return block(`Blocked: \`gh repo ${action}\` without an explicit Danathar/openaudible-autoupdate target.`);
+    }
+
+    if (target === null) {
+        return block(`Blocked: \`gh ${group} ${action}\` has no --repo/-R/GH_REPO; gh would resolve the repository from git remotes or its default.`);
+    }
+    if (!isTarget(target)) {
+        return block(`Blocked: \`gh ${group} ${action}\` targets "${target}", not Danathar/openaudible-autoupdate.`);
+    }
+    if (group === 'pr' && action === 'create') return checkPrCreate(args);
+    return null;
+}
+
+/** Convention: PRs are created with an explicit `--base main` and `--head <branch>`. */
+function checkPrCreate(args) {
+    // Flags whose value must be skipped so e.g. `--body "-Bump deps"` is not read as `-B`.
+    const takesValue = new Set([
+        '--title', '-t', '--body', '-b', '--body-file', '-F', '--label', '-l', '--assignee', '-a',
+        '--reviewer', '-r', '--milestone', '-m', '--project', '-p', '--template', '-T',
+    ]);
+    const flagValue = (long, short) => {
+        let found = null;
+        for (let i = 0; i < args.length; i++) {
+            const a = args[i];
+            if (a === long || a === short) found = args[i + 1] ?? '';
+            else if (a.startsWith(`${long}=`)) found = a.slice(long.length + 1);
+            else if (a.startsWith(short) && a.length > 2 && !a.startsWith('--')) found = a.slice(2); // -Bdevelop
+            if (a === long || a === short || takesValue.has(a)) i++; // skip this flag's value
+        }
+        return found; // gh honours the last occurrence of a repeated flag
+    };
+    const base = flagValue('--base', '-B');
+    const head = flagValue('--head', '-H');
+    if (base !== 'main') {
+        return block('Blocked: `gh pr create` needs an explicit `--base main`.');
+    }
+    if (!head) {
+        return block('Blocked: `gh pr create` needs an explicit `--head <branch>`.');
+    }
+    return null;
+}
+
+// ---------------------------------------------------------------------------
+// git
+// ---------------------------------------------------------------------------
+
+// git config keys that can redirect where a push goes or how it authenticates.
+// (push.* keys such as push.default or push.autoSetupRemote cannot change the target.)
+const RISKY_GIT_CONFIG = /^(remote\.|url\.|credential\.|core\.sshcommand$)/i;
+
+function checkGit(args, inlineEnv = {}, exported = {}) {
+    // Walk global options to find the subcommand, vetting `-c key=value`.
+    let i = 0;
+    while (i < args.length && args[i].startsWith('-')) {
+        const a = args[i];
+        let configKey = null;
+        if (a === '-c' || a === '--config-env') configKey = (args[i + 1] ?? '').split('=')[0];
+        else if (a.startsWith('--config-env=')) configKey = a.slice(13).split('=')[0];
+        if (configKey !== null && RISKY_GIT_CONFIG.test(configKey)) {
+            return block(`Blocked: \`git ${a} ${configKey}=...\` could redirect pushes or credentials.`);
+        }
+        i += ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'].includes(a) ? 2 : 1;
+    }
+    const sub = args[i];
+    const rest = args.slice(i + 1);
+
+    if (sub === 'push') {
+        const envKey = Object.keys({ ...exported, ...inlineEnv }).find((k) => /^(GIT_CONFIG_|GIT_SSH)/i.test(k));
+        if (envKey) return block(`Blocked: \`git push\` with ${envKey}= could redirect the push.`);
+        return checkGitPush(rest);
+    }
+    if (sub === 'remote') return checkGitRemote(rest);
+    if (sub === 'config') return checkGitConfig(rest);
+    return null;
+}
+
+/** Writes to push-redirecting config keys (`git config remote.origin.url ...`). */
+function checkGitConfig(rest) {
+    const readOnly = ['--get', '--get-all', '--get-regexp', '--get-urlmatch', '--list', '-l', '--show-origin', '--show-scope'];
+    if (rest.some((a) => readOnly.includes(a))) return null;
+
+    // Collect positionals, skipping the values of options that take one
+    // (`git config -f .git/config remote.origin.url <url>`).
+    const valueFlags = ['-f', '--file', '--blob', '--type', '--default', '--comment', '--value', '--url'];
+    const positionals = [];
+    for (let k = 0; k < rest.length; k++) {
+        const a = rest[k];
+        if (valueFlags.includes(a)) k++;
+        else if (!a.startsWith('-')) positionals.push(a);
+    }
+
+    // Modern syntax: `git config set|unset|replace-all|... <key> [value]`.
+    const verbs = ['set', 'unset', 'replace-all', 'add', 'rename-section', 'remove-section', 'edit'];
+    const readVerbs = ['get', 'list'];
+    let modifies = false;
+    const verbRenames = positionals[0] === 'rename-section';
+    if (positionals.length && readVerbs.includes(positionals[0])) return null;
+    if (positionals.length && verbs.includes(positionals[0])) {
+        if (positionals[0] === 'edit') {
+            return block('Blocked: `git config edit` could redirect pushes or credentials.');
+        }
+        positionals.shift();
+        modifies = true;
+    }
+    const key = positionals[0];
+    // Legacy syntax: a write is `key value`, or --unset/--add/--replace-all/section edits.
+    modifies =
+        modifies ||
+        positionals.length > 1 ||
+        rest.some((a) => /^--(unset|unset-all|add|replace-all|remove-section|rename-section)$/.test(a));
+    if (key !== undefined && RISKY_GIT_CONFIG.test(key) && modifies) {
+        return block(`Blocked: \`git config ${key}\` write could redirect pushes or credentials.`);
+    }
+    // Section renames move settings between names: check both the old and the new
+    // section (`git config rename-section foo remote.origin` adopts foo.pushurl).
+    const renames = verbRenames || rest.includes('--rename-section');
+    if (renames && positionals.some((p) => RISKY_GIT_CONFIG.test(`${p}.x`))) {
+        return block('Blocked: `git config rename-section` involving a remote/url/credential section could redirect pushes.');
+    }
+    if (rest.includes('--edit') || rest.includes('-e')) {
+        return block('Blocked: `git config --edit` could redirect pushes or credentials.');
+    }
+    return null;
+}
+
+function checkGitPush(rest) {
+    const positionals = [];
+    for (let i = 0; i < rest.length; i++) {
+        const a = rest[i];
+        if (['-o', '--push-option', '--receive-pack', '--exec'].includes(a)) i++;
+        else if (a === '--repo' || a.startsWith('--repo=')) {
+            return block('Blocked: `git push --repo` redirects the push; name the remote `origin` instead.');
+        } else if (a === '--force' || a.startsWith('--force-with-lease') || a === '--force-if-includes') {
+            return block('Blocked: force push.');
+        } else if (a === '--mirror') {
+            return block('Blocked: `git push --mirror` overwrites the remote.');
+        } else if (/^-[a-zA-Z]*f[a-zA-Z]*$/.test(a)) {
+            return block('Blocked: force push (-f).');
+        } else if (!a.startsWith('-')) positionals.push(a);
+    }
+    const [remote, ...refspecs] = positionals;
+    if (remote === undefined) {
+        return block('Blocked: `git push` without an explicit remote; use `git push origin <branch>`.');
+    }
+    if (remote !== 'origin') {
+        return block(`Blocked: \`git push ${remote}\`; only the \`origin\` remote may be pushed to.`);
+    }
+    if (refspecs.some((r) => r.startsWith('+'))) {
+        return block('Blocked: force push via "+" refspec.');
+    }
+    return null;
+}
+
+function checkGitRemote(rest) {
+    const sub = rest[0];
+    const flags = [];
+    const plain = [];
+    for (let k = 1; k < rest.length; k++) {
+        const a = rest[k];
+        if (a.startsWith('-')) {
+            flags.push(a);
+            if (['-t', '-m', '--track', '--master'].includes(a)) k++; // option takes a value
+        } else plain.push(a);
+    }
+    const [name, url] = plain;
+    const originHint =
+        '`origin` is https://github.com/Danathar/openaudible-autoupdate; it must not be removed, renamed or re-pointed.';
+
+    // Anything that could remove, replace or re-point `origin` would defeat the
+    // "push only to origin" rule (`git push origin` would then reach another repo).
+    if (['remove', 'rm', 'rename'].includes(sub) && plain.includes('origin')) {
+        return block(`Blocked: \`git remote ${sub}\` involving origin. ${originHint}`);
+    }
+    if (sub === 'add' && name === 'origin' && !isTarget(url ?? '')) {
+        return block(`Blocked: \`git remote add origin\` with a URL that is not this repository. ${originHint}`);
+    }
+    if (sub !== 'set-url') return null;
+    if (url === undefined) return null;
+    const push = flags.includes('--push');
+    if (push && url !== 'DISABLE' && !(name === 'origin' && isTarget(url))) {
+        return block(
+            `Blocked: \`git remote set-url --push ${name}\` to a real URL. ` +
+                'Use `DISABLE`, or the Danathar/openaudible-autoupdate URL for origin.'
+        );
+    }
+    if (name === 'origin' && !isTarget(url)) {
+        return block(`Blocked: \`origin\` may only point at https://github.com/Danathar/openaudible-autoupdate.`);
+    }
+    return null;
+}
+
+// ---------------------------------------------------------------------------
+// Updater / host-modifying commands
+// ---------------------------------------------------------------------------
+
+const PRIVILEGE = new Set(['sudo', 'doas', 'pkexec', 'run0', 'su']);
+const DNF = new Set(['dnf', 'dnf5', 'dnf-3', 'yum', 'microdnf']);
+const CONTAINER_ENTER = new Set(['distrobox', 'distrobox-enter', 'distrobox-host-exec', 'toolbox']);
+const CONTAINER_ENGINES = new Set(['podman', 'docker', 'nerdctl']);
+// Words a wrapper (env, timeout, xargs, ...) can hide; we look through the wrapper to them.
+const LOOKTHROUGH = new Set([
+    'gh', 'git', ...SHELLS, 'eval', 'source', 'rpm', 'rpm-ostree', 'bootc', 'pkcon', 'systemctl', 'systemd-run',
+    ...PRIVILEGE, 'flatpak-spawn', ...DNF, ...CONTAINER_ENTER, ...CONTAINER_ENGINES,
+]);
+
+/** True if a tokenized segment names the updater as an argument or reads it with `<`. */
+function segmentReadsUpdater(seg) {
+    return seg.some(isScriptName) || (seg.stdinFrom !== undefined && isScriptName(seg.stdinFrom));
+}
+
+/** True if a command line (a substitution body) reads or names the updater. */
+function readsUpdater(commandLine) {
+    return tokenize(commandLine).some(segmentReadsUpdater);
+}
+
+/** True for `openaudible-autoupdate.sh` / `openaudible-autoupdate` in any path form. */
+function isScriptName(word) {
+    return basename(String(word)).replace(/\.sh$/, '') === SCRIPT;
+}
+
+const STUB_COMMANDS = ['sudo', 'dnf', 'rpm'];
+
+/**
+ * True if the FIRST entry of a PATH value is a stubs directory: an absolute
+ * path (or one anchored at $CLAUDE_PROJECT_DIR) inside the project, under a
+ * `tests/<dir>` path, no `..`, no other expansions, and holding executable
+ * stubs for sudo, dnf and rpm (so the script's `sudo dnf install` cannot reach
+ * the real ones). Relative entries are refused: they resolve against the
+ * shell's cwd, not the project root.
+ */
+export function stubsDirOk(pathValue) {
+    if (!pathValue) return false;
+    let dir = pathValue.split(':')[0];
+    const root = (process.env.CLAUDE_PROJECT_DIR || process.cwd()).replace(/\/+$/, '');
+    dir = dir.replace(/^\$(?:\{CLAUDE_PROJECT_DIR\}|CLAUDE_PROJECT_DIR)(?=\/|$)/, root);
+    if (!isAbsolute(dir) || dir.includes('..') || /[$`~]/.test(dir)) return false;
+    // Resolve symlinks: a `tests/stubs` link (or stub file) pointing outside the
+    // project must not make the real sudo/dnf/rpm satisfy the exemption.
+    let realRoot;
+    let abs;
+    try {
+        realRoot = realpathSync(root);
+        abs = realpathSync(dir);
+    } catch {
+        return false;
+    }
+    const within = (path) => path.startsWith(`${realRoot}/`);
+    if (!within(abs) || !/(^|\/)tests\/[^/]/.test(abs.slice(realRoot.length + 1))) return false;
+    return STUB_COMMANDS.every((name) => {
+        try {
+            const file = realpathSync(join(abs, name));
+            accessSync(file, fsConstants.X_OK);
+            return within(file);
+        } catch {
+            return false;
+        }
+    });
+}
+
+function checkUpdaterRun(envPath, state, what) {
+    if (!state.noStubs && stubsDirOk(envPath)) return null;
+    return block(
+        `Blocked: ${what} would execute openaudible-autoupdate.sh, which runs \`sudo dnf install -y\` on this machine. ` +
+            'Run it only through the tests/e2e container harness, or with PATH=<dir>:$PATH where <dir> is under tests/ ' +
+            `inside this project and holds executable ${STUB_COMMANDS.join(', ')} stubs. ` +
+            '`distrobox enter` / `toolbox run` reach the real container and never qualify.'
+    );
+}
+
+/** `distrobox enter`, `toolbox run|enter`: the real container, always refused; `distrobox-host-exec cmd`: cmd is analysed as running for real. */
+function checkContainerEnter(cmd, args, state) {
+    const sub = args.find((a) => !a.startsWith('-'));
+    if (cmd === 'distrobox-enter' || (cmd === 'distrobox' && sub === 'enter') || (cmd === 'toolbox' && (sub === 'run' || sub === 'enter'))) {
+        return block(`Blocked: \`${cmd}${sub ? ` ${sub}` : ''}\` enters the developer's real long-lived container (real rpm database, working sudo); use \`podman run\` of tests/e2e instead.`);
+    }
+    if (cmd !== 'distrobox-host-exec') return null; // other distrobox/toolbox subcommands (create, list, ephemeral, ...) run nothing of ours
+    const at = args.findIndex((a) => !a.startsWith('-'));
+    const inner = at === -1 ? [] : args.slice(at);
+    if (inner.length) {
+        const real = Object.assign(Object.create(state), { noStubs: true, exportedPath: undefined });
+        return checkSegment(inner, real);
+    }
+    return null;
+}
+
+function firstWord(args, valueFlags) {
+    for (let i = 0; i < args.length; i++) {
+        if (valueFlags.includes(args[i])) i++;
+        else if (!args[i].startsWith('-')) return { sub: args[i], rest: args.slice(i + 1) };
+    }
+    return { sub: undefined, rest: [] };
+}
+
+const DNF_READ = ['list', 'info', 'search', 'repoquery', 'provides', 'whatprovides', 'check-update', 'check-upgrade', 'repolist', 'repoinfo', 'help'];
+
+function checkDnf(cmd, args) {
+    const { sub, rest } = firstWord(args, [
+        '-c', '--config', '--installroot', '--releasever', '-x', '--exclude', '--repo', '--enablerepo',
+        '--disablerepo', '--forcearch', '--destdir', '--downloaddir',
+    ]);
+    if (sub === undefined || DNF_READ.includes(sub)) return null;
+    if ((sub === 'history' || sub === 'repo') && ['list', 'info'].includes(rest[0])) return null;
+    return block(`Blocked: \`${cmd} ${sub}\` changes packages on this machine; only read-only queries (${DNF_READ.join(', ')}) are allowed.`);
+}
+
+function checkRpm(args) {
+    const longs = args.filter((a) => a.startsWith('--'));
+    const shorts = args.filter((a) => /^-[a-zA-Z]+$/.test(a));
+    const writesLong = ['--install', '--upgrade', '--freshen', '--erase', '--reinstall', '--import', '--rebuilddb'];
+    const queryLong = longs.some((l) => ['--query', '--verify', '--checksig'].includes(l));
+    // -U/-F/-e change packages wherever they appear, even next to -q; -i is
+    // "info" only when a query/verify/checksig flag is also present
+    // (`rpm -qi`, `rpm -q -i`).
+    const queryMode = queryLong || shorts.some((s) => /[qVK]/.test(s));
+    const writes = shorts.some((s) => /[UFe]/.test(s) || (/i/.test(s) && !queryMode));
+    if (longs.some((l) => writesLong.includes(l)) || writes) {
+        return block('Blocked: `rpm` install/upgrade/erase modes change packages on this machine; query (-q), verify (-V) and checksig (-K) are fine.');
+    }
+    return null;
+}
+
+
+function checkImageTool(cmd, args) {
+    const { sub } = firstWord(args, []);
+    const readOnly = {
+        'rpm-ostree': ['status', 'db', 'help'],
+        bootc: ['status', 'help'],
+        pkcon: ['search', 'resolve', 'what-provides', 'get-details', 'get-files', 'get-packages', 'get-updates', 'get-update-detail', 'repo-list', 'help'],
+    }[cmd];
+    if (sub === undefined || readOnly.includes(sub)) return null;
+    return block(`Blocked: \`${cmd} ${sub}\` changes the booted image or installed packages; only ${readOnly.join('/')} are allowed.`);
+}
+
+const SYSTEMCTL_CHANGING = [
+    'enable', 'reenable', 'start', 'restart', 'try-restart', 'reload-or-restart', 'try-reload-or-restart',
+    'link', 'edit', 'add-wants', 'add-requires', 'preset', 'unmask', 'isolate', 'revert',
+];
+
+function checkSystemctl(args) {
+    const { sub } = firstWord(args, ['-H', '--host', '-M', '--machine', '-p', '--property', '-t', '--type', '-s', '--signal', '-n', '--lines', '-o', '--output', '--state']);
+    if (sub !== undefined && SYSTEMCTL_CHANGING.includes(sub) && args.some((a) => a.includes(SCRIPT))) {
+        return block(`Blocked: \`systemctl ${sub}\` of an ${SCRIPT}* unit would schedule the real updater on this machine (user or system scope).`);
+    }
+    return null;
+}
+
+// ---------------------------------------------------------------------------
+// Segment / command analysis
+// ---------------------------------------------------------------------------
+
+// Options of wrapper commands that take a separate value word.
+const WRAPPER_VALUE_OPTS = {
+    timeout: ['-s', '--signal', '-k', '--kill-after'],
+    nice: ['-n', '--adjustment'],
+    xargs: ['-n', '-I', '-L', '-P', '-s', '-d', '-E', '-a', '--max-args', '--max-procs', '--delimiter', '--arg-file'],
+    stdbuf: ['-i', '-o', '-e'],
+    ionice: ['-c', '-n', '-p', '-P', '-u'],
+    env: ['-u', '--unset', '-C', '--chdir'],
+};
+
+/** Index of the command a wrapper (env, timeout, xargs, ...) runs, or -1 if there is none to analyse. */
+function wrapperTarget(w) {
+    const cmd = basename(w[0]);
+    if (cmd === 'command' && w.some((a) => /^-[a-zA-Z]*[vV]/.test(a))) return -1; // lookup only
+    const valueOpts = WRAPPER_VALUE_OPTS[cmd] ?? [];
+    let needDuration = cmd === 'timeout';
+    for (let k = 1; k < w.length; k++) {
+        const a = w[k];
+        if (isAssignment(a) || a === '--') continue;
+        if (a.startsWith('-') && a.length > 1) {
+            if (valueOpts.includes(a)) k++;
+            continue;
+        }
+        if (needDuration) {
+            needDuration = false;
+            continue;
+        }
+        return k;
+    }
+    return -1;
+}
+
+function checkSegment(words, state) {
+    const { pipedFrom, stdinFrom, hereString, heredocBody } = words;
+    let w = words.slice();
+    const inlineEnv = {};
+    for (;;) {
+        while (w.length && (isAssignment(w[0]) || KEYWORDS.has(w[0]))) {
+            if (isAssignment(w[0])) {
+                const eq = w[0].indexOf('=');
+                inlineEnv[w[0].slice(0, eq)] = w[0].slice(eq + 1);
+            }
+            w.shift();
+        }
+        if (!w.length) return null;
+        const cmd = basename(w[0]);
+        if (PRIVILEGE.has(cmd)) {
+            return block(`Blocked: \`${cmd}\` (privilege escalation) is never run by agents in this repository.`);
+        }
+        if (!WRAPPERS.has(cmd)) break;
+        // `env -S 'gh pr create'` / `--split-string=...` runs a command string.
+        // Only env's own leading options and NAME=value words are scanned; the
+        // wrapped command's arguments (e.g. `--title -Sx`) are not env options.
+        if (cmd === 'env') {
+            for (let k = 1; k < w.length; k++) {
+                const a = w[k];
+                if (isAssignment(a)) continue;
+                if (!a.startsWith('-')) break; // first word of the wrapped command
+                if (['-u', '--unset', '-C', '--chdir'].includes(a)) {
+                    k++;
+                    continue;
+                }
+                let script = null;
+                let rest = k + 1;
+                if (a === '-S' || a === '--split-string') {
+                    script = w[k + 1] ?? '';
+                    rest = k + 2;
+                } else if (a.startsWith('--split-string=')) script = a.slice(15);
+                else if (/^-S./.test(a)) script = a.slice(2);
+                if (script === null) continue;
+                // Check the string on its own, then as the head of the command
+                // that still has the remaining words appended.
+                const alone = checkCommand(script, state);
+                if (alone) return alone;
+                const head = tokenize(script).flat();
+                return checkSegment([...head, ...w.slice(rest)], state);
+            }
+        }
+        // Look through the wrapper to the command it runs: skip its own options
+        // (and their values), NAME=value words, and timeout's duration.
+        const idx = wrapperTarget(w);
+        for (const x of w.slice(1, idx === -1 ? w.length : idx)) {
+            if (isAssignment(x)) {
+                const eq = x.indexOf('=');
+                inlineEnv[x.slice(0, eq)] = x.slice(eq + 1);
+            }
+        }
+        if (idx === -1) return null;
+        w = w.slice(idx);
+    }
+
+    const cmd = basename(w[0]);
+    const args = w.slice(1);
+    const envPath = inlineEnv.PATH ?? state.exportedPath;
+    // Nested analysis (`bash -c '...'`, `eval`) sees this segment's PATH, but
+    // anything it exports stays inside it, as in a real subshell.
+    const nested = (extra = {}) => Object.assign(Object.create(state), { exportedPath: envPath }, extra);
+
+    if (cmd === 'export' || ((cmd === 'declare' || cmd === 'typeset') && args.some((a) => /^-[a-zA-Z]*x/.test(a)))) {
+        for (const a of args) {
+            if (a.startsWith('GH_REPO=')) state.exportedGhRepo = a.slice(8);
+            if (a.startsWith('PATH=')) state.exportedPath = a.slice(5);
+            if (/^(GIT_CONFIG_|GIT_SSH)/i.test(a)) (state.exportedEnv ??= {})[a.split('=')[0]] = a;
+        }
+        return null;
+    }
+    if (cmd === 'gh') {
+        const envRepo = inlineEnv.GH_REPO ?? state.exportedGhRepo ?? null;
+        return checkGh(args, envRepo);
+    }
+    if (cmd === 'git') return checkGit(args, inlineEnv, state.exportedEnv ?? {});
+    if (isScriptName(w[0])) return checkUpdaterRun(envPath, state, `Running ${w[0]}`);
+    if (cmd === 'source' || cmd === '.') {
+        return args.some(isScriptName) ? checkUpdaterRun(envPath, state, `Sourcing ${args.find(isScriptName)}`) : null;
+    }
+    if (SHELLS.has(cmd)) {
+        const c = args.findIndex((a) => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(a));
+        // The script is the first non-option word after -c (`sh -c -- 'cmd'`, `sh -c -x 'cmd'`).
+        const script = c === -1 ? undefined : args.slice(c + 1).find((a) => !a.startsWith('-'));
+        if (script !== undefined) {
+            // `bash -c "$(cat openaudible-autoupdate.sh)"`: the whole script text is the updater.
+            if (/^\$\([\s\S]*\)$|^`[\s\S]*`$/.test(script.trim()) && extractSubstitutions(script).some(readsUpdater)) {
+                return checkUpdaterRun(envPath, state, `\`${cmd} -c\` reading ${SCRIPT}.sh`);
+            }
+            return checkCommand(script, nested());
+        }
+        // `bash -n file` only parses the file; any other shell invocation runs it.
+        const syntaxOnly = args.some((a) => /^-[a-zA-Z]*n[a-zA-Z]*$/.test(a));
+        const target = args.find(isScriptName);
+        if (!syntaxOnly && target !== undefined) return checkUpdaterRun(envPath, state, `\`${cmd} ${target}\``);
+        // No script operand: the shell reads its program from stdin
+        // (`cat openaudible-autoupdate.sh | bash`, `bash -s < openaudible-autoupdate.sh`).
+        if (!syntaxOnly && !args.some((a) => !a.startsWith('-'))) {
+            // `bash <<< "$(cat openaudible-autoupdate.sh)"`: the here-string expands to the updater.
+            const hereReads = hereString !== undefined && extractSubstitutions(hereString).some(readsUpdater);
+            let pipeReads = false;
+            const feeders = [];
+            for (let p = pipedFrom; p; p = p.pipedFrom) {
+                feeders.push(p);
+                if (segmentReadsUpdater(p)) pipeReads = true;
+            }
+            const reads = hereReads || (stdinFrom !== undefined && isScriptName(stdinFrom)) || pipeReads;
+            if (reads) return checkUpdaterRun(envPath, state, `\`${cmd}\` reading ${SCRIPT}.sh on stdin`);
+            // A heredoc or here-string fed to a shell is a script it runs.
+            // The same holds for text piped in (`cat <<'EOF' | bash`).
+            // A literal `echo`/`printf` payload piped in is a script too.
+            const literal = (f) => {
+                const name = basename(f[0] ?? '');
+                if (name !== 'echo' && name !== 'printf') return undefined;
+                const rest = f.slice(1).filter((a) => !a.startsWith('-'));
+                if (name === 'printf') rest.shift(); // the format string
+                return rest.join(' ');
+            };
+            for (const text of [heredocBody, hereString, ...feeders.flatMap((f) => [f.heredocBody, f.hereString, literal(f)])]) {
+                if (text === undefined) continue;
+                const r = checkCommand(text, nested());
+                if (r) return r;
+            }
+        }
+        return null;
+    }
+    if (cmd === 'eval') return checkCommand(args.join(' '), nested());
+    if (DNF.has(cmd)) return checkDnf(cmd, args);
+    if (cmd === 'rpm') return checkRpm(args);
+    if (cmd === 'rpm-ostree' || cmd === 'bootc' || cmd === 'pkcon') return checkImageTool(cmd, args);
+    if (cmd === 'systemctl') return checkSystemctl(args);
+    if (cmd === 'systemd-run' || cmd === 'flatpak-spawn') {
+        // They run a command outside this shell's PATH and cwd: look through to it,
+        // always as a real (non-stubbed) run.
+        const at = args.findIndex((a) => isScriptName(a) || LOOKTHROUGH.has(basename(a)));
+        if (at !== -1) {
+            const real = Object.assign(Object.create(state), { noStubs: true, exportedPath: undefined });
+            const r = checkSegment(args.slice(at), real);
+            if (r) return r;
+        }
+        const target = args.find((a) => a.includes(SCRIPT));
+        return target === undefined ? null : block(`Blocked: \`${cmd} ${target}\` would run openaudible-autoupdate.sh outside any stub or container.`);
+    }
+    if (CONTAINER_ENTER.has(cmd)) return checkContainerEnter(cmd, args, state);
+    if (CONTAINER_ENGINES.has(cmd)) {
+        // `docker container exec ...` / `podman container run ...` are the long
+        // forms of `exec` / `run`; judge them the same way.
+        const words = args.filter((a) => !a.startsWith('-'));
+        const sub = words[0] === 'container' ? words[1] : words[0];
+        // `exec`/`attach` reach long-lived containers, including the distrobox
+        // container (distrobox containers are podman containers).
+        if (sub === 'exec' || sub === 'attach') {
+            return block(`Blocked: \`${cmd} ${sub}\` enters an existing container, possibly the real distrobox one; use \`${cmd} run\` with a throwaway container.`);
+        }
+        // A container run that mentions the updater is exempt only when it is
+        // the e2e harness (a path containing tests/e2e).
+        const named = args.find((a) => a.includes(SCRIPT));
+        if (named !== undefined && !args.some((a) => /(^|\/)tests\/e2e(\/|$)/.test(a))) {
+            return block(`Blocked: \`${cmd}\` with ${named} is not the tests/e2e harness; container runs of the updater are only allowed via tests/e2e.`);
+        }
+        return null;
+    }
+    return null;
+}
+
+/** Analyse a command line. Returns null if allowed, else { blocked, reason }. */
+export function checkCommand(command, state = {}) {
+    for (const sub of extractSubstitutions(command)) {
+        const r = checkCommand(sub, state);
+        if (r) return r;
+    }
+    for (const words of tokenize(command)) {
+        const r = checkSegment(words, state);
+        if (r) return r;
+    }
+    return null;
+}
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+export function main(check = checkCommand) {
+    // Claude Code blocks only on exit 2; any other failure (an uncaught
+    // exception exits 1) lets the command run. So nothing may escape this function.
+    try {
+        let payload;
+        try {
+            payload = JSON.parse(readFileSync(0, 'utf8'));
+        } catch {
+            process.stderr.write('guard-bash: could not parse hook input as JSON; blocking (fail closed).\n');
+            process.exit(2);
+        }
+        if (payload?.tool_name && payload.tool_name !== 'Bash') process.exit(0);
+        const command = payload?.tool_input?.command;
+        if (typeof command !== 'string' || !command.trim()) process.exit(0);
+
+        const result = check(command);
+        if (result) {
+            process.stderr.write(`guard-bash: ${result.reason}\n`);
+            process.exit(2);
+        }
+    } catch (err) {
+        process.stderr.write(`guard-bash: internal error (${err?.message ?? err}); blocking (fail closed).\n`);
+        process.exit(2);
+    }
+    process.exit(0);
+}
+
+/** True when this file is the program being run (also through a symlink); never fails open. */
+function isMain() {
+    const arg = process.argv[1];
+    if (!arg) return false;
+    const self = fileURLToPath(import.meta.url);
+    if (resolve(arg) === self) return true;
+    try {
+        return realpathSync(arg) === self;
+    } catch {
+        // Cannot tell: assume we are the hook if the file is named like it.
+        return basename(arg) === 'guard-bash.mjs';
+    }
+}
+
+if (isMain()) main();

@@ -1,0 +1,49 @@
+{
+    "$schema": "https://json.schemastore.org/claude-code-settings.json",
+    "permissions": {
+        "allow": [
+            "Bash(bats:*)",
+            "Bash(shellcheck:*)",
+            "Bash(bash -n:*)",
+            "Bash(node --test:*)",
+            "Bash(git status:*)",
+            "Bash(git diff:*)",
+            "Bash(git log:*)",
+            "Bash(git show:*)",
+            "Bash(git branch:*)"
+        ],
+        "ask": [
+            "Bash(git push:*)",
+            "Edit(.github/workflows/**)",
+            "Write(.github/workflows/**)",
+            "Edit(openaudible-autoupdate.sh)",
+            "Write(openaudible-autoupdate.sh)",
+            "Edit(systemd/**)",
+            "Write(systemd/**)"
+        ],
+        "deny": [
+            "Bash(git push --force:*)",
+            "Bash(git push -f:*)",
+            "Bash(git push --force-with-lease:*)",
+            "Bash(git reset --hard:*)",
+            "Bash(sudo:*)",
+            "Bash(dnf install:*)",
+            "Bash(rpm -i:*)",
+            "Bash(rpm -U:*)",
+            "Bash(systemctl --user enable:*)"
+        ]
+    },
+    "hooks": {
+        "PreToolUse": [
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-bash.mjs\""
+                    }
+                ]
+            }
+        ]
+    }
+}
