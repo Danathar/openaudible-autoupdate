@@ -1,0 +1,9 @@
+# ShellCheck configuration, picked up automatically by shellcheck and by the
+# `lint` job in .github/workflows/ci.yml.
+shell=bash
+# Follow `source`d helpers (tests/unit/helpers.bash) relative to each file.
+source-path=SCRIPTDIR
+# Every @test in bats runs in its own subshell, so exporting a variable inside
+# a test trips SC2030/SC2031 even though that is exactly what is intended.
+# The main script is clean without any disables.
+disable=SC2030,SC2031
