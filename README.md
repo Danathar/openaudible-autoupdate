@@ -117,6 +117,38 @@ journalctl --user -u openaudible-autoupdate.service
 systemctl --user disable --now openaudible-autoupdate.timer
 ```
 
+## Testing
+
+Never run `openaudible-autoupdate.sh` itself to "try it out" on a development
+machine: a real run ends in `sudo dnf install -y`. The tests below stub or
+containerise everything that touches the system.
+
+```bash
+# Unit tests (needs bats and jq). rpm, curl, sudo, dnf, notify-send and
+# systemd-cat are replaced by stubs on a private PATH; nothing real is called.
+bats tests/unit
+
+# Lint (config in .shellcheckrc)
+git ls-files -z '*.sh' '*.bash' '*.bats' | xargs -0 shellcheck
+
+# End-to-end (needs podman or docker): builds two dummy OpenAudible rpms in a
+# throwaway Fedora container, serves a manifest locally and runs the real
+# script with a real `dnf install` inside that container only.
+tests/e2e/run.sh
+
+# Coverage (line coverage of the script under the unit tests, via kcov, which
+# is packaged for Fedora). Floor is in .coverage-thresholds.json.
+podman run --rm --security-opt label=disable -v "$PWD:/src:ro" registry.fedoraproject.org/fedora:latest bash -c '
+  dnf install -y -q kcov bats jq gawk git nodejs &&
+  cp -r /src /work && cd /work &&
+  kcov --include-pattern=openaudible-autoupdate.sh coverage bats tests/unit &&
+  node scripts/coverage-gate.mjs'
+```
+
+CI (`.github/workflows/ci.yml`) runs lint, the unit tests on Ubuntu and in a
+Fedora container, and the end-to-end test; `.github/workflows/coverage-gate.yml`
+enforces the coverage floor.
+
 ## License
 
 GPL-3.0-only, see [LICENSE](LICENSE).
