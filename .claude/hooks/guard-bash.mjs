@@ -1062,7 +1062,15 @@ function checkSegment(words, state) {
             if (reads) return checkUpdaterRun(envPath, state, `\`${cmd}\` reading ${SCRIPT}.sh on stdin`);
             // A heredoc or here-string fed to a shell is a script it runs.
             // The same holds for text piped in (`cat <<'EOF' | bash`).
-            for (const text of [heredocBody, hereString, ...feeders.flatMap((f) => [f.heredocBody, f.hereString])]) {
+            // A literal `echo`/`printf` payload piped in is a script too.
+            const literal = (f) => {
+                const name = basename(f[0] ?? '');
+                if (name !== 'echo' && name !== 'printf') return undefined;
+                const rest = f.slice(1).filter((a) => !a.startsWith('-'));
+                if (name === 'printf') rest.shift(); // the format string
+                return rest.join(' ');
+            };
+            for (const text of [heredocBody, hereString, ...feeders.flatMap((f) => [f.heredocBody, f.hereString, literal(f)])]) {
                 if (text === undefined) continue;
                 const r = checkCommand(text, nested());
                 if (r) return r;
@@ -1089,7 +1097,10 @@ function checkSegment(words, state) {
     }
     if (CONTAINER_ENTER.has(cmd)) return checkContainerEnter(cmd, args, state);
     if (CONTAINER_ENGINES.has(cmd)) {
-        const sub = args.find((a) => !a.startsWith('-'));
+        // `docker container exec ...` / `podman container run ...` are the long
+        // forms of `exec` / `run`; judge them the same way.
+        const words = args.filter((a) => !a.startsWith('-'));
+        const sub = words[0] === 'container' ? words[1] : words[0];
         // `exec`/`attach` reach long-lived containers, including the distrobox
         // container (distrobox containers are podman containers).
         if (sub === 'exec' || sub === 'attach') {
