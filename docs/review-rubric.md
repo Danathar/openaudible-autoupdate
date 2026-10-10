@@ -69,17 +69,25 @@ The script runs with `set -euo pipefail`, which makes some innocent-looking
 lines fatal and others silently ignored. Review each changed line for which
 one it is.
 
-- [ ] **`cmd && other` as the last command of a function.** The function's
-      status is the status of the `&&` list, so when `cmd` fails the function
-      returns non-zero and `set -e` ends the script. The `log()` helper at
-      line 20 of `openaudible-autoupdate.sh` at `d769ba1`
-      (`command -v systemd-cat ... && echo ... | systemd-cat`) had exactly this
-      shape: in an environment without `systemd-cat` the first `log` call
-      aborts the script with status 1. The same `&&` form inside an `if`
-      branch (the `notify-send` line) does not abort. This was checked with
-      `bash -c 'set -e; f(){ echo hi; false && echo y; }; f; echo after'`,
-      which never prints `after`. Prefer `if ...; then ...; fi` or end the
-      function with `|| true` when the failure is meant to be harmless.
+- [ ] **`cmd && other` as the last command of a function or of the script.**
+      The status of the function (or of the script, when it is the final
+      command) is the status of the `&&` list, so when `cmd` fails the result
+      is non-zero. Two instances existed in `openaudible-autoupdate.sh` at
+      `d769ba1`:
+      - `log()` (line 20, `command -v systemd-cat ... && echo ... | systemd-cat`):
+        in an environment without `systemd-cat` the function returns 1 and
+        `set -e` aborts the script at the first `log` call. Checked with
+        `bash -c 'set -e; f(){ echo hi; false && echo y; }; f; echo after'`,
+        which never prints `after`.
+      - The `notify-send` line (line 70) is the last command of the script,
+        inside the `if sudo dnf install ...` branch. `set -e` does not fire
+        there, but the `if` statement's status is 1, so when `notify-send` is
+        absent the script **exits 1 after a successful upgrade** and systemd
+        marks the oneshot unit failed. Checked with
+        `bash -c 'set -euo pipefail; if true; then echo upgraded; command -v no-notify-send >/dev/null 2>&1 && no-notify-send a b; else exit 1; fi'; echo $?`,
+        which prints `1`.
+      Prefer `if ...; then ...; fi`, or end with `|| true` when the failure is
+      meant to be harmless, and finish a script with an explicit `exit 0`.
 - [ ] **Command substitutions** (`x=$(jq ...)`) fail the script when the inner
       command fails. Where a failure is expected (`rpm -q` when the package is
       not installed) it must sit in an `if !` or `||` so the script chooses
