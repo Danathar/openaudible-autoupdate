@@ -178,7 +178,7 @@ export function tokenize(input) {
     const endSegment = (pipe = false) => {
         endWord();
         skip = null;
-        if (words.length) {
+        if (words.length || stdinFrom !== undefined) {
             words.stdinFrom = stdinFrom;
             words.hereString = hereString;
             words.pipedFrom = pendingPipe;
@@ -231,15 +231,24 @@ export function tokenize(input) {
             endSegment();
             i++;
             // Skip the bodies of heredocs started on the line that just ended.
+            // The body is kept on the segment that started the heredoc: a shell
+            // reading it runs it, so it is analysed as a command line.
             while (pendingHeredocs.length) {
-                const delim = pendingHeredocs.shift();
+                const { delim, seg } = pendingHeredocs.shift();
+                const bodyStart = i;
+                let bodyEnd = input.length;
                 while (i < input.length) {
                     let eol = input.indexOf('\n', i);
                     if (eol === -1) eol = input.length;
+                    const lineStart = i;
                     const line = input.slice(i, eol).replace(/^\t+/, '');
                     i = eol + 1;
-                    if (line === delim) break;
+                    if (line === delim) {
+                        bodyEnd = lineStart;
+                        break;
+                    }
                 }
+                seg.heredocBody = (seg.heredocBody ?? '') + input.slice(bodyStart, bodyEnd);
             }
         } else if (c === '<' && input[i + 1] === '<' && input[i + 2] !== '<') {
             i += 2;
@@ -258,7 +267,11 @@ export function tokenize(input) {
                 i++;
             }
             endWord();
-            if (delim) pendingHeredocs.push(delim);
+            if (delim) pendingHeredocs.push({ delim, seg: words });
+        } else if ((c === '<' || c === '>') && input[i + 1] === '(') {
+            // Process substitution `<(cmd)` / `>(cmd)`: an argument; its body is analysed separately.
+            append('/dev/fd/N');
+            i = closeParen(input, i + 2);
         } else if ((c === '<' || c === '>' || c === '&') && REDIRECT.test(input.slice(i, i + 3))) {
             // Redirections end the word and are not arguments: `./x.sh>log`, `2>&1`,
             // `&>f`, `<file`. The target word is consumed (and remembered for `<`).
@@ -278,11 +291,14 @@ export function tokenize(input) {
             endSegment();
             i++;
         } else if (c === '`') {
-            endSegment(); // substitution contents are analysed separately
-            i++;
+            // Substitution contents are analysed separately; the enclosing
+            // command line carries on after the closing backtick.
+            append('$()');
+            const end = input.indexOf('`', i + 1);
+            i = end === -1 ? input.length : end + 1;
         } else if (c === '$' && input[i + 1] === '(') {
-            endSegment();
-            i += 2;
+            append('$()');
+            i = closeParen(input, i + 2);
         } else {
             append(c);
             i++;
@@ -318,27 +334,8 @@ export function extractSubstitutions(input) {
             // commands). An unquoted body is expanded by the shell, so it is scanned.
             while (pending.length && pending[0].quoted) i = skipHeredocBody(input, i + 1, pending.shift().delim) - 1;
             pending.length = 0;
-        } else if (!inSingle && c === '$' && input[i + 1] === '(') {
-            let depth = 1;
-            let j = i + 2;
-            // Match the closing paren, ignoring parens in quotes, escaped, or in heredoc bodies.
-            let q = null;
-            const inner = [];
-            for (; j < input.length && depth > 0; j++) {
-                const d = input[j];
-                if (d === '\\' && q !== "'") j++;
-                else if (q) {
-                    if (d === q) q = null;
-                } else if (d === "'" || d === '"') q = d;
-                else if (d === '<' && input[j + 1] === '<' && input[j + 2] !== '<') {
-                    const h = readHeredocStart(input, j);
-                    if (h.delim) inner.push(h);
-                    j = h.next - 1;
-                } else if (d === '\n' && inner.length) {
-                    while (inner.length) j = skipHeredocBody(input, j + 1, inner.shift().delim) - 1;
-                } else if (d === '(') depth++;
-                else if (d === ')') depth--;
-            }
+        } else if (!inSingle && (c === '$' || (!inDouble && (c === '<' || c === '>'))) && input[i + 1] === '(') {
+            const j = closeParen(input, i + 2);
             found.push(input.slice(i + 2, j - 1));
             i = j - 1; // nested substitutions are found by the recursive analysis
         } else if (!inSingle && c === '`') {
@@ -349,6 +346,32 @@ export function extractSubstitutions(input) {
         }
     }
     return found;
+}
+
+/**
+ * Index just past the `)` that closes a substitution whose body starts at `j`,
+ * ignoring parens in quotes, escaped, or in heredoc bodies.
+ */
+function closeParen(input, j) {
+    let depth = 1;
+    let q = null;
+    const inner = [];
+    for (; j < input.length && depth > 0; j++) {
+        const d = input[j];
+        if (d === '\\' && q !== "'") j++;
+        else if (q) {
+            if (d === q) q = null;
+        } else if (d === "'" || d === '"') q = d;
+        else if (d === '<' && input[j + 1] === '<' && input[j + 2] !== '<') {
+            const h = readHeredocStart(input, j);
+            if (h.delim) inner.push(h);
+            j = h.next - 1;
+        } else if (d === '\n' && inner.length) {
+            while (inner.length) j = skipHeredocBody(input, j + 1, inner.shift().delim) - 1;
+        } else if (d === '(') depth++;
+        else if (d === ')') depth--;
+    }
+    return j;
 }
 
 /** Parse `<<[-]['"]DELIM['"]` at input[i]; returns { delim, quoted, next } (next = index after it). */
@@ -741,6 +764,16 @@ const LOOKTHROUGH = new Set([
     ...PRIVILEGE, 'flatpak-spawn', ...DNF, ...CONTAINER_ENTER, ...CONTAINER_ENGINES,
 ]);
 
+/** True if a tokenized segment names the updater as an argument or reads it with `<`. */
+function segmentReadsUpdater(seg) {
+    return seg.some(isScriptName) || (seg.stdinFrom !== undefined && isScriptName(seg.stdinFrom));
+}
+
+/** True if a command line (a substitution body) reads or names the updater. */
+function readsUpdater(commandLine) {
+    return tokenize(commandLine).some(segmentReadsUpdater);
+}
+
 /** True for `openaudible-autoupdate.sh` / `openaudible-autoupdate` in any path form. */
 function isScriptName(word) {
     return basename(String(word)).replace(/\.sh$/, '') === SCRIPT;
@@ -909,7 +942,7 @@ function wrapperTarget(w) {
 }
 
 function checkSegment(words, state) {
-    const { pipedFrom, stdinFrom, hereString } = words;
+    const { pipedFrom, stdinFrom, hereString, heredocBody } = words;
     let w = words.slice();
     const inlineEnv = {};
     for (;;) {
@@ -997,7 +1030,7 @@ function checkSegment(words, state) {
         const script = c === -1 ? undefined : args.slice(c + 1).find((a) => !a.startsWith('-'));
         if (script !== undefined) {
             // `bash -c "$(cat openaudible-autoupdate.sh)"`: the whole script text is the updater.
-            if (/^\$\([\s\S]*\)$|^`[\s\S]*`$/.test(script.trim()) && extractSubstitutions(script).some((s) => tokenize(s).flat().some(isScriptName))) {
+            if (/^\$\([\s\S]*\)$|^`[\s\S]*`$/.test(script.trim()) && extractSubstitutions(script).some(readsUpdater)) {
                 return checkUpdaterRun(envPath, state, `\`${cmd} -c\` reading ${SCRIPT}.sh`);
             }
             return checkCommand(script, nested());
@@ -1010,9 +1043,17 @@ function checkSegment(words, state) {
         // (`cat openaudible-autoupdate.sh | bash`, `bash -s < openaudible-autoupdate.sh`).
         if (!syntaxOnly && !args.some((a) => !a.startsWith('-'))) {
             // `bash <<< "$(cat openaudible-autoupdate.sh)"`: the here-string expands to the updater.
-            const hereReads = hereString !== undefined && extractSubstitutions(hereString).some((sub) => tokenize(sub).flat().some(isScriptName));
-            const reads = hereReads || (stdinFrom !== undefined && isScriptName(stdinFrom)) || (pipedFrom?.some(isScriptName) ?? false);
+            const hereReads = hereString !== undefined && extractSubstitutions(hereString).some(readsUpdater);
+            let pipeReads = false;
+            for (let p = pipedFrom; p && !pipeReads; p = p.pipedFrom) pipeReads = segmentReadsUpdater(p);
+            const reads = hereReads || (stdinFrom !== undefined && isScriptName(stdinFrom)) || pipeReads;
             if (reads) return checkUpdaterRun(envPath, state, `\`${cmd}\` reading ${SCRIPT}.sh on stdin`);
+            // A heredoc or here-string fed to a shell is a script it runs.
+            for (const text of [heredocBody, hereString]) {
+                if (text === undefined) continue;
+                const r = checkCommand(text, nested());
+                if (r) return r;
+            }
         }
         return null;
     }
