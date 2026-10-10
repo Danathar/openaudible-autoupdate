@@ -39,6 +39,9 @@
 //     `-c` keys such as diff.external, core.pager, alias.*; GIT_* / PAGER /
 //     EDITOR variables (inline or exported) other than identity and no-op
 //     pagers (GIT_EXTERNAL_DIFF=, GIT_TRACE=FILE, GIT_DIR=, ...).
+//   - `bash -n` (pre-approved syntax check) with a word beginning with +
+//     (`+n`, `+o noexec` turn -n off and run the script) or one bash could
+//     expand into such a word ({, }, *, ?, [, $, backtick).
 //   node
 //   - `node --test` with any option outside the test-runner allowlist
 //     (--import, --require/-r, --loader, module reporters,
@@ -1170,6 +1173,21 @@ function checkSegment(words, state) {
         return args.some(isScriptName) ? checkUpdaterRun(envPath, state, `Sourcing ${args.find(isScriptName)}`) : null;
     }
     if (SHELLS.has(cmd)) {
+        // `bash -n` is pre-approved in .claude/settings.json because -n parses a
+        // script without running it, but a later `+n` or `+o noexec` turns -n off
+        // again: `bash -n +n -c 'cmd'` runs cmd with no prompt. Refuse any word
+        // beginning with + in a -n invocation, and any word bash could rewrite
+        // into one first (`{+,+}n`, `?n` beside a file named +n, `$X`).
+        if (args.some((a) => /^-[a-zA-Z]*n[a-zA-Z]*$/.test(a))) {
+            const bad = args.find((a) => a.startsWith('+') || /[{}*?[$`]/.test(a));
+            if (bad !== undefined) {
+                return block(
+                    `Blocked: \`${cmd} -n ... ${bad}\`; -n only parses a script, and +n or +o noexec turns that off ` +
+                        'so the command would run under the syntax-check allow rule. Check syntax with `bash -n FILE` only; ' +
+                        'run a script as itself so the permission rules see it.'
+                );
+            }
+        }
         const c = args.findIndex((a) => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(a));
         // The script is the first non-option word after -c (`sh -c -- 'cmd'`, `sh -c -x 'cmd'`).
         const script = c === -1 ? undefined : args.slice(c + 1).find((a) => !a.startsWith('-'));
