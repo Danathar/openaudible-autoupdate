@@ -206,6 +206,14 @@ export function tokenize(input) {
             i++;
             append('');
             while (i < input.length && input[i] !== '"') {
+                if (input[i] === '$' && input[i + 1] === '(') {
+                    // A substitution body may contain quotes of its own; it is analysed separately.
+                    // Its text stays in the word (a `bash -c "$(cat x)"` script is re-analysed from it).
+                    const end = closeParen(input, i + 2);
+                    append(input.slice(i, end));
+                    i = end;
+                    continue;
+                }
                 if (input[i] === '\\' && i + 1 < input.length) {
                     const next = input[i + 1];
                     if ('"\\$`'.includes(next)) i++;
@@ -1045,11 +1053,16 @@ function checkSegment(words, state) {
             // `bash <<< "$(cat openaudible-autoupdate.sh)"`: the here-string expands to the updater.
             const hereReads = hereString !== undefined && extractSubstitutions(hereString).some(readsUpdater);
             let pipeReads = false;
-            for (let p = pipedFrom; p && !pipeReads; p = p.pipedFrom) pipeReads = segmentReadsUpdater(p);
+            const feeders = [];
+            for (let p = pipedFrom; p; p = p.pipedFrom) {
+                feeders.push(p);
+                if (segmentReadsUpdater(p)) pipeReads = true;
+            }
             const reads = hereReads || (stdinFrom !== undefined && isScriptName(stdinFrom)) || pipeReads;
             if (reads) return checkUpdaterRun(envPath, state, `\`${cmd}\` reading ${SCRIPT}.sh on stdin`);
             // A heredoc or here-string fed to a shell is a script it runs.
-            for (const text of [heredocBody, hereString]) {
+            // The same holds for text piped in (`cat <<'EOF' | bash`).
+            for (const text of [heredocBody, hereString, ...feeders.flatMap((f) => [f.heredocBody, f.hereString])]) {
                 if (text === undefined) continue;
                 const r = checkCommand(text, nested());
                 if (r) return r;

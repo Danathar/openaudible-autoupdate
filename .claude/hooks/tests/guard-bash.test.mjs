@@ -143,6 +143,10 @@ const allowed = [
     'wc -l $((1+2)) openaudible-autoupdate.sh',
     "bash <<'EOF'\necho harmless `date`\nEOF",
     'cat openaudible-autoupdate.sh | head -3',
+    // Quotes inside a quoted $(cat <<'EOF' ...) body do not end the outer string.
+    'gh pr create --repo Danathar/openaudible-autoupdate --base main --head b --title t --body "$(cat <<\'EOF\'\nExample: "x; sudo true" is refused.\nEOF\n)"',
+    'git commit -m "$(cat <<\'EOF\'\nodd " quote and `sudo` mention\nEOF\n)"',
+    'echo "$(date) and $(git rev-parse HEAD)" openaudible-autoupdate.sh',
     'rpm-ostree status',
     'bootc status',
     'pkcon search audible',
@@ -361,6 +365,10 @@ const blocked = [
     ["bash <<-EOF\n\tdnf upgrade\nEOF", 'changes packages'],
     ["cat x | bash <<'EOF'\nsystemctl --user enable openaudible-autoupdate.timer\nEOF", 'systemctl'],
     ['bash <<< "sudo ls"', 'privilege'],
+    ["cat <<'EOF' | bash\nsudo dnf install -y x\nEOF", 'privilege'],
+    ["cat <<EOF | tee /dev/null | sh -s\n./openaudible-autoupdate.sh\nEOF", 'would execute'],
+    ['gh pr create --repo Danathar/openaudible-autoupdate --base main --head b --body "$(cat <<\'EOF\'\nok\nEOF\n)" && sudo true', 'privilege'],
+    ['echo "$(sudo true)"', 'privilege'],
     // The updater read through <, a pipe chain or a $(< file) substitution.
     ['bash -c "$(< openaudible-autoupdate.sh)"', 'reading'],
     ['cat openaudible-autoupdate.sh | tee /dev/null | bash', 'stdin'],
