@@ -1,0 +1,11 @@
+{
+    "$comment": "Line-coverage floor for openaudible-autoupdate.sh under the bats unit tests (tests/unit), measured with kcov 43 in registry.fedoraproject.org/fedora:latest (see 'Coverage' in README.md). Enforced by scripts/coverage-gate.mjs via .github/workflows/coverage-gate.yml. kcov reports line coverage only for Bash. 'measured' was 45/45 lines on the commit that introduced this file; 'floor' sits 5 points below so a newly added, untested branch of a few lines fails but ordinary churn passes. Floors only go up; a human edits this file.",
+    "tool": "kcov",
+    "areas": {
+        "openaudible-autoupdate.sh": {
+            "summary": "coverage/bats/coverage.json",
+            "measured": { "lines": 100 },
+            "floor": { "lines": 95 }
+        }
+    }
+}
