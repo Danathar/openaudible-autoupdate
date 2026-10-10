@@ -18,12 +18,20 @@ script keeps an existing **rpm** install current:
    (`https://openaudible.org/downloads/swt_version.json`); `jq` reads
    `.version`, `.download_dir`, `.platforms[$PLATFORM_KEY].file` and
    `.platforms[$PLATFORM_KEY].sha256`.
+   Before any of these is used the manifest must be a JSON object, and each
+   value must be a string of the right shape: version `^[0-9A-Za-z._+~]+$`,
+   file a plain `*.rpm` name (no `/`, no leading `.`), sha256 64 lowercase
+   hex characters, `download_dir` an `https://` URL. Otherwise it logs
+   "Invalid version manifest..." and exits 1.
 3. If the manifest version differs from the installed one (string
    inequality, not a semver comparison), it downloads
-   `${download_dir}${file}` into a `mktemp -d` directory, compares
-   `sha256sum` against the manifest, and only then runs
-   `sudo dnf install -y <rpm>`.
-4. Logs to stdout and `systemd-cat`; `notify-send` after a successful upgrade.
+   `${download_dir}${file}` (`--proto =https --proto-redir =https`) into a
+   `mktemp -d` directory, compares `sha256sum` against the manifest, checks
+   `rpm -qp --qf '%{NAME} %{VERSION}'` equals `$PKG_NAME $version`, and only
+   then runs `sudo dnf install -y <rpm>`.
+4. After dnf exits 0 it re-reads `rpm -q`; if the installed version is not
+   the manifest's, it logs that the install did not take effect and exits 1.
+5. Logs to stdout and `systemd-cat`; `notify-send` after a confirmed upgrade.
 
 Licence: GPL-3.0-only (see `LICENSE`). Default branch: `main`.
 

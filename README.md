@@ -16,10 +16,17 @@ own version manifest and upgrades the installed rpm automatically.
 2. Fetches `https://openaudible.org/downloads/swt_version.json`, which lists
    the current release version and, per platform, a download URL and
    `sha256` checksum.
-3. If the manifest's version is newer than what's installed, downloads the
-   rpm, verifies its checksum, and runs `sudo dnf install -y` on it.
-4. Logs to stdout/`systemd-cat` and sends a desktop notification (if
-   `notify-send` is available) on a successful upgrade.
+3. Checks the manifest before using it: it must be a JSON object, the version
+   must look like an rpm version, the file must be a plain `.rpm` name, the
+   `sha256` must be 64 hex characters and `download_dir` must be an
+   `https://` URL. Anything else stops the run with a log line.
+4. If the manifest's version differs from what's installed (a plain
+   comparison, not "newer"), downloads the rpm over https only, verifies its
+   checksum, checks that the rpm header names the expected package and
+   version, and runs `sudo dnf install -y` on it.
+5. Confirms with `rpm -q` that the new version is really installed, then logs
+   to stdout/`systemd-cat` and sends a desktop notification (if `notify-send`
+   is available). If dnf exits 0 without installing it, the run fails instead.
 
 If OpenAudible isn't installed via rpm, or is already current, the script
 exits cleanly and does nothing.
