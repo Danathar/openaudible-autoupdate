@@ -17,10 +17,12 @@ trap 'rm -rf "$WORKDIR"' EXIT
 
 log() {
   echo "[$LOG_TAG] $*"
-  command -v systemd-cat >/dev/null 2>&1 && echo "$*" | systemd-cat -t "$LOG_TAG"
+  if command -v systemd-cat >/dev/null 2>&1; then
+    echo "$*" | systemd-cat -t "$LOG_TAG"
+  fi
 }
 
-for dep in curl jq rpm sudo dnf sha256sum; do
+for dep in curl jq rpm sudo dnf sha256sum awk; do
   command -v "$dep" >/dev/null 2>&1 || { log "Missing required dependency: $dep"; exit 1; }
 done
 
@@ -67,7 +69,9 @@ fi
 log "Checksum verified. Installing $file_name..."
 if sudo dnf install -y "$rpm_path"; then
   log "$PKG_NAME upgraded: $installed_version -> $latest_version."
-  command -v notify-send >/dev/null 2>&1 && notify-send "$PKG_NAME updated" "Now on version $latest_version"
+  if command -v notify-send >/dev/null 2>&1; then
+    notify-send "$PKG_NAME updated" "Now on version $latest_version"
+  fi
 else
   log "dnf install failed."
   exit 1

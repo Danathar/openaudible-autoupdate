@@ -1,0 +1,49 @@
+name: Coverage gate
+
+# Measures line coverage of openaudible-autoupdate.sh under the bats unit tests
+# with kcov (inside a Fedora container, where kcov is packaged) and fails a pull
+# request or a push to main when it drops below the floor in
+# .coverage-thresholds.json (compared by scripts/coverage-gate.mjs).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: coverage-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    name: Coverage gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: registry.fedoraproject.org/fedora:latest
+    steps:
+      - name: Install kcov, bats and tools
+        run: dnf install -y -q kcov bats jq gawk git nodejs
+
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Measure coverage with kcov
+        # Writes coverage/bats/coverage.json (see .coverage-thresholds.json).
+        run: |
+          kcov --version
+          kcov --include-pattern=openaudible-autoupdate.sh coverage bats tests/unit
+
+      - name: Compare against floor
+        run: |
+          set -o pipefail
+          node scripts/coverage-gate.mjs | tee gate.txt
+
+      - name: Publish table
+        if: always()
+        run: |
+          if [ -f gate.txt ]; then
+            { cat gate.txt; echo; } >> "$GITHUB_STEP_SUMMARY"
+          fi
