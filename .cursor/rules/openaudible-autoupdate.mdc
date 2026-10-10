@@ -1,0 +1,13 @@
+---
+description: Rules for openaudible-autoupdate, a Bash updater for the OpenAudible rpm
+alwaysApply: true
+---
+
+Full rules are in `AGENTS.md`; read it first. Essentials:
+
+- One Bash script (`openaudible-autoupdate.sh`) plus systemd user units in `systemd/`. It reads OpenAudible's manifest (`VERSION_URL`, `PKG_NAME`, `PLATFORM_KEY`), verifies sha256, then runs `sudo dnf install -y`.
+- Never run the script for real. Use stubbed commands (`bats tests/`) or containers (`tests/e2e/`).
+- Never remove, skip or soften the sha256 verification; never add `--nogpgcheck` or `curl -k`.
+- Keep `set -euo pipefail`; run `shellcheck openaudible-autoupdate.sh` and `bats tests/` before finishing.
+- Conventional Commits; `gh` commands need `--repo Danathar/openaudible-autoupdate`.
+- Licence: GPL-3.0-only.

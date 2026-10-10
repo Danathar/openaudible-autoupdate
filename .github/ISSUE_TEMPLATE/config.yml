@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: OpenAudible itself (the app, its downloads, its licence)
+    url: https://openaudible.org/
+    about: This repo only updates an existing OpenAudible rpm. Problems with the app belong with its authors.
