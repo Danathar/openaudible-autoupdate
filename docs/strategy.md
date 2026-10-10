@@ -43,8 +43,9 @@ From [`README.md`](../README.md):
   make a test pass.
 - Grow into a package manager: no other distributions' formats, no repository
   hosting. It keeps an existing rpm install current.
-- Let an agent merge its own pull request or widen its own permissions
-  ([`multi-agent.md`](multi-agent.md)).
+- Let an agent merge its own pull request, or widen its own permissions. A
+  merge is a human's, or the Hive serialized lane's after the required checks
+  pass ([`multi-agent.md`](multi-agent.md)).
 
 ## Measurable goals
 
@@ -57,10 +58,10 @@ file's own header is the source of truth. Run the command for today's answer.
 |---|---|---|
 | Reach and hold the target ACMM level | the ACMM evaluator's result for this repo; open criteria are the `[ACMM L<n>]` issues | `gh issue list --repo Danathar/openaudible-autoupdate --state open --limit 100` (titles start with `[ACMM`) |
 | `main` stays green | the jobs in `.github/workflows/ci.yml` (`Lint (shellcheck)`, `Unit tests (ubuntu bash)`, `Unit tests (fedora container)`, `E2E (fedora container)`) on pushes to `main` | `gh run list --repo Danathar/openaudible-autoupdate --workflow ci.yml --branch main --limit 10 --json createdAt,conclusion` |
-| Tests do not lose coverage | the line-coverage floor for `openaudible-autoupdate.sh` in `.coverage-thresholds.json` (95% when written, measured 100% on 45 lines), enforced by `.github/workflows/coverage-gate.yml` (job `Coverage gate`); a floor guards against regression, it is not a target to climb | a floor guards against regression, it is not a target to climb |
+| Tests do not lose coverage | the line-coverage floor for `openaudible-autoupdate.sh` in `.coverage-thresholds.json` (95% when written, measured 100% on 45 lines), enforced by `.github/workflows/coverage-gate.yml` (job `Coverage gate`); a floor guards against regression, it is not a target to climb | `gh run list --repo Danathar/openaudible-autoupdate --workflow coverage-gate.yml --branch main --limit 10 --json createdAt,conclusion` |
 | The script still matches OpenAudible's manifest | the `Upstream manifest contract` job in `.github/workflows/nightly-compliance.yml`, which fetches the live manifest and checks that the fields the script reads are still there; the same workflow repeats the unit, shellcheck and e2e jobs nightly | `gh run list --repo Danathar/openaudible-autoupdate --workflow nightly-compliance.yml --limit 7` |
 | Change flow is visible | PR counts, review findings, CI outcomes, read by `scripts/pr-metrics.mjs` | [`metrics.md`](metrics.md), dated snapshots in [`metrics/`](metrics/) |
-| Agent work is traceable | every agent PR has `Closes #N`, a signature line and a human merger | [`agent-tasks/`](agent-tasks/README.md), the `agent-audit.yml` run summary |
+| Agent work is traceable | every agent PR has `Closes #N`, a signature line and a merger that is a human or the Hive serialized lane | [`agent-tasks/`](agent-tasks/README.md), the `agent-audit.yml` run summary |
 
 The fields the script depends on are `.version`, `.download_dir` and
 `.platforms[$PLATFORM_KEY].file` and `.sha256`

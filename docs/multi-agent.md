@@ -104,7 +104,8 @@ reading and settled by the owner.
    - **`openaudible-autoupdate.sh`** is the product and the one file almost every
      behaviour change touches. Only one open pull request at a time should
      change its logic; a second one waits or rebases onto the first. The tests
-     in `tests/unit/` (bats, with stubbed commands) and `tests/e2e/` pin its behaviour with stubbed commands, so a rebase that
+     in `tests/unit/` (bats, with stubbed commands) and `tests/e2e/` (the real script against dummy
+     rpms in a throwaway Fedora container) pin its behaviour, so a rebase that
      passes them has kept the contract.
    - **`README.md`** documents that script (install, configuration variables,
      usage). A change to an environment variable (`VERSION_URL`, `PKG_NAME`,
@@ -122,17 +123,17 @@ reading and settled by the owner.
 
 No agent merges its own pull request unless the owner has set that up.
 
-- **Required checks.** The checks meant to gate a merge are the jobs in
-  [`.github/workflows/ci.yml`](../.github/workflows/ci.yml): `Lint (shellcheck)`,
-  `Unit tests (ubuntu bash)`, `Unit tests (fedora container)` and
-  `E2E (fedora container)`. They run on every pull request. The `Coverage gate`
-  job is a separate workflow
-  ([`coverage-gate.yml`](../.github/workflows/coverage-gate.yml)); whether the
-  ruleset also requires it is for the ruleset to say. The ruleset recorded in
-  `.github/rulesets/main.json` and explained in
-  [`branch-protection.md`](branch-protection.md) (issue #42) is the authority on
-  which checks are required and whether branches must be up to date; if it
-  disagrees with this paragraph, it wins. Check what is live with
+- **Required checks.** Ruleset `protect main` (id 24826574, active when read on
+  2026-10-10) requires `Lint (shellcheck)`, `Unit tests (ubuntu bash)`,
+  `Unit tests (fedora container)` and `E2E (fedora container)` (the jobs in
+  [`ci.yml`](../.github/workflows/ci.yml)) and `Coverage gate`
+  ([`coverage-gate.yml`](../.github/workflows/coverage-gate.yml)), with branches
+  required to be up to date. Once the governance pull request (#55) has merged,
+  `policy-check` ([`policy-check.yml`](../.github/workflows/policy-check.yml))
+  is added as a sixth. All run on every pull request; a red one blocks the
+  merge. The ruleset is recorded in `.github/rulesets/main.json` and explained in
+  [`branch-protection.md`](branch-protection.md) (issue #42, PR #58); if either
+  disagrees with this paragraph, they win. Check what is live with
   `gh api repos/Danathar/openaudible-autoupdate/rulesets --jq '.[] | [.name, .enforcement] | @tsv'`.
 - **Serialized merging (issue #42).** Hive merges this repository through its
   serialized lane (`merge_strategy: hive-serialized`): one pull request at a

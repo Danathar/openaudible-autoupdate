@@ -64,7 +64,7 @@ gh workflow list --repo Danathar/openaudible-autoupdate --all
 ```
 
 Disabling a required check leaves pull requests waiting for a status that never
-arrives. Disable `CI` or `Coverage gate` only if you also relax the ruleset
+arrives. Disable `CI`, `Coverage gate` or `Policy check` only if you also relax the ruleset
 ([`branch-protection.md`](branch-protection.md)). To remove a workflow
 permanently, delete the file in a pull request.
 
@@ -180,7 +180,8 @@ the `dnf` commands below run inside the container.
 **Roll OpenAudible back.** The script keeps no copy of the rpm: it downloads into
 a temporary directory that is removed when it exits
 (`openaudible-autoupdate.sh:15-16`). Roll back from dnf's record or from the
-vendor's release (these commands were not run for this page):
+vendor's release (the local-file `dnf install` below was tried with dummy rpms, see
+the note after it; `dnf history undo` was not):
 
 ```bash
 sudo dnf history list                       # find the transaction that upgraded OpenAudible
@@ -191,10 +192,11 @@ sudo dnf install ./OpenAudible_<old version>_x86_64.rpm
 
 There is no package repository behind OpenAudible, so `sudo dnf downgrade
 OpenAudible` works only if a configured repo happens to carry the older version.
-Installing a local rpm file with `dnf install` is how a specific version is put
-back when no repository provides it, and it keeps dependency solving. If dnf
-refuses with a message about a newer version being installed, read that message
-before forcing anything; this page does not prescribe a flag that was not tried.
+Installing the older rpm as a local file keeps dependency solving. Tried on
+2026-10-10 in a throwaway `registry.fedoraproject.org/fedora:latest` container
+with two dummy rpm versions (2.0 installed, then `dnf install` of the 1.0 file):
+dnf reported `Downgrading` and `Replacing`, exited 0, and `rpm -q` then showed
+1.0. If your dnf behaves differently, read its message before forcing anything.
 
 The older rpm comes from OpenAudible: the manifest's `download_dir` is
 `https://github.com/openaudible/openaudible/releases/download/v<version>/`, so an
@@ -272,5 +274,6 @@ and start one by hand with
 The users' own timer is a different thing: `openaudible-autoupdate.timer` is
 `OnCalendar=daily` with `Persistent=true` and a 30 minute random delay
 (`systemd/openaudible-autoupdate.timer`), so a run missed while the machine was
-off happens at the next boot. Check it on the machine with
+off happens when the user's systemd manager next starts and activates the
+timer: at the next login, or at boot if lingering is enabled for that user. Check it on the machine with
 `systemctl --user list-timers openaudible-autoupdate.timer`.
