@@ -83,7 +83,7 @@
 // recursively. Quoted text is data, so a quoted "sudo" or script name inside
 // an `echo` or a read-only command is fine.
 
-import { basename, join, isAbsolute } from 'node:path';
+import { basename, join, isAbsolute, resolve } from 'node:path';
 import { readFileSync, accessSync, realpathSync, constants as fsConstants } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -164,10 +164,12 @@ export function tokenize(input) {
 
     let skip = null; // 'in' | 'out': the next word is a redirection target
     let stdinFrom; // target of `< file` for the current segment
+    let hereString; // word of `<<< word` for the current segment
     let pendingPipe = null; // previous segment when this one is the right side of `|`
     const endWord = () => {
         if (word !== null) {
             if (skip === 'in') stdinFrom = word;
+            else if (skip === 'here') hereString = word;
             else if (skip === null) words.push(word);
             skip = null;
         }
@@ -178,11 +180,13 @@ export function tokenize(input) {
         skip = null;
         if (words.length) {
             words.stdinFrom = stdinFrom;
+            words.hereString = hereString;
             words.pipedFrom = pendingPipe;
             segments.push(words);
             pendingPipe = pipe ? words : null;
         }
         stdinFrom = undefined;
+        hereString = undefined;
         words = [];
     };
     const append = (ch) => {
@@ -261,7 +265,7 @@ export function tokenize(input) {
             const op = REDIRECT.exec(input.slice(i, i + 3))[0];
             if (word !== null && /^\d+$/.test(word)) word = null; // fd number: `2>`
             endWord();
-            skip = op.startsWith('<') && op !== '<<<' ? 'in' : 'out';
+            skip = op === '<<<' ? 'here' : op.startsWith('<') ? 'in' : 'out';
             i += op.length;
         } else if (c === ' ' || c === '\t') {
             endWord();
@@ -758,12 +762,23 @@ export function stubsDirOk(pathValue) {
     const root = (process.env.CLAUDE_PROJECT_DIR || process.cwd()).replace(/\/+$/, '');
     dir = dir.replace(/^\$(?:\{CLAUDE_PROJECT_DIR\}|CLAUDE_PROJECT_DIR)(?=\/|$)/, root);
     if (!isAbsolute(dir) || dir.includes('..') || /[$`~]/.test(dir)) return false;
-    const abs = dir;
-    if (!abs.startsWith(`${root}/`) || !/(^|\/)tests\/[^/]/.test(abs.slice(root.length + 1))) return false;
+    // Resolve symlinks: a `tests/stubs` link (or stub file) pointing outside the
+    // project must not make the real sudo/dnf/rpm satisfy the exemption.
+    let realRoot;
+    let abs;
+    try {
+        realRoot = realpathSync(root);
+        abs = realpathSync(dir);
+    } catch {
+        return false;
+    }
+    const within = (path) => path.startsWith(`${realRoot}/`);
+    if (!within(abs) || !/(^|\/)tests\/[^/]/.test(abs.slice(realRoot.length + 1))) return false;
     return STUB_COMMANDS.every((name) => {
         try {
-            accessSync(join(abs, name), fsConstants.X_OK);
-            return true;
+            const file = realpathSync(join(abs, name));
+            accessSync(file, fsConstants.X_OK);
+            return within(file);
         } catch {
             return false;
         }
@@ -894,7 +909,7 @@ function wrapperTarget(w) {
 }
 
 function checkSegment(words, state) {
-    const { pipedFrom, stdinFrom } = words;
+    const { pipedFrom, stdinFrom, hereString } = words;
     let w = words.slice();
     const inlineEnv = {};
     for (;;) {
@@ -994,7 +1009,9 @@ function checkSegment(words, state) {
         // No script operand: the shell reads its program from stdin
         // (`cat openaudible-autoupdate.sh | bash`, `bash -s < openaudible-autoupdate.sh`).
         if (!syntaxOnly && !args.some((a) => !a.startsWith('-'))) {
-            const reads = (stdinFrom !== undefined && isScriptName(stdinFrom)) || (pipedFrom?.some(isScriptName) ?? false);
+            // `bash <<< "$(cat openaudible-autoupdate.sh)"`: the here-string expands to the updater.
+            const hereReads = hereString !== undefined && extractSubstitutions(hereString).some((sub) => tokenize(sub).flat().some(isScriptName));
+            const reads = hereReads || (stdinFrom !== undefined && isScriptName(stdinFrom)) || (pipedFrom?.some(isScriptName) ?? false);
             if (reads) return checkUpdaterRun(envPath, state, `\`${cmd}\` reading ${SCRIPT}.sh on stdin`);
         }
         return null;
@@ -1052,34 +1069,44 @@ export function checkCommand(command, state = {}) {
 // Entry point
 // ---------------------------------------------------------------------------
 
-function main() {
-    let payload;
+export function main(check = checkCommand) {
+    // Claude Code blocks only on exit 2; any other failure (an uncaught
+    // exception exits 1) lets the command run. So nothing may escape this function.
     try {
-        payload = JSON.parse(readFileSync(0, 'utf8'));
-    } catch {
-        process.stderr.write('guard-bash: could not parse hook input as JSON; blocking (fail closed).\n');
-        process.exit(2);
-    }
-    if (payload?.tool_name && payload.tool_name !== 'Bash') process.exit(0);
-    const command = payload?.tool_input?.command;
-    if (typeof command !== 'string' || !command.trim()) process.exit(0);
+        let payload;
+        try {
+            payload = JSON.parse(readFileSync(0, 'utf8'));
+        } catch {
+            process.stderr.write('guard-bash: could not parse hook input as JSON; blocking (fail closed).\n');
+            process.exit(2);
+        }
+        if (payload?.tool_name && payload.tool_name !== 'Bash') process.exit(0);
+        const command = payload?.tool_input?.command;
+        if (typeof command !== 'string' || !command.trim()) process.exit(0);
 
-    const result = checkCommand(command);
-    if (result) {
-        process.stderr.write(`guard-bash: ${result.reason}\n`);
+        const result = check(command);
+        if (result) {
+            process.stderr.write(`guard-bash: ${result.reason}\n`);
+            process.exit(2);
+        }
+    } catch (err) {
+        process.stderr.write(`guard-bash: internal error (${err?.message ?? err}); blocking (fail closed).\n`);
         process.exit(2);
     }
     process.exit(0);
 }
 
+/** True when this file is the program being run (also through a symlink); never fails open. */
 function isMain() {
-    if (!process.argv[1]) return false;
-    // Node resolves the main module through realpath but leaves argv[1] as given;
-    // a symlinked project path would otherwise disable the hook (fail open).
+    const arg = process.argv[1];
+    if (!arg) return false;
+    const self = fileURLToPath(import.meta.url);
+    if (resolve(arg) === self) return true;
     try {
-        return fileURLToPath(import.meta.url) === realpathSync(process.argv[1]);
+        return realpathSync(arg) === self;
     } catch {
-        return false;
+        // Cannot tell: assume we are the hook if the file is named like it.
+        return basename(arg) === 'guard-bash.mjs';
     }
 }
 

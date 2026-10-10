@@ -28,6 +28,13 @@ for (const name of ['sudo', 'dnf', 'rpm']) {
     stub('other/stubs', name);
 }
 stub('tests/partial', 'sudo');
+// Symlink escapes: a stubs dir (or stub files) that resolve outside the project are not stubs.
+const OUTSIDE = mkdtempSync(join(tmpdir(), 'oaa-guard-out-'));
+for (const name of ['sudo', 'dnf', 'rpm']) writeFileSync(join(OUTSIDE, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+symlinkSync(OUTSIDE, join(PROJECT, 'tests/dirlink'));
+mkdirSync(join(PROJECT, 'tests/filelinks'), { recursive: true });
+for (const name of ['sudo', 'dnf', 'rpm']) symlinkSync(join(OUTSIDE, name), join(PROJECT, 'tests/filelinks', name));
+after(() => rmSync(OUTSIDE, { recursive: true, force: true }));
 mkdirSync(join(PROJECT, 'tests/empty'), { recursive: true });
 after(() => rmSync(PROJECT, { recursive: true, force: true }));
 
@@ -126,6 +133,8 @@ const allowed = [
     'gh pr create --repo Danathar/openaudible-autoupdate --base main --head feat/x --title t --body "$(cat <<\'EOF\'\nnever run `./openaudible-autoupdate.sh` or `sudo dnf install`; it\'s unsafe\nEOF\n)"',
     'git commit -F - <<\'EOF\'\nfix: stop using `sudo dnf install` in docs\nEOF',
     'cat > /var/tmp/pr-body.md <<\'EOF\'\nRun `git push` after `git status`\nEOF',
+    'bash <<< "echo hi"',
+    'cat <<< "hello"',
     'rpm-ostree status',
     'bootc status',
     'pkcon search audible',
@@ -337,6 +346,10 @@ const blocked = [
     ['bash < openaudible-autoupdate.sh', 'stdin'],
     ['bash -s <openaudible-autoupdate.sh', 'stdin'],
     ['sudo>/dev/null true', 'privilege'],
+    ['bash <<< "$(cat openaudible-autoupdate.sh)"', 'stdin'],
+    ['sh -s <<<"$(cat ./openaudible-autoupdate.sh)"', 'stdin'],
+    [`PATH=${PROJECT}/tests/dirlink:$PATH ./openaudible-autoupdate.sh`, 'would execute'],
+    [`PATH=${PROJECT}/tests/filelinks:$PATH ./openaudible-autoupdate.sh`, 'would execute'],
     ['dnf install>/dev/null x', 'changes packages'],
     // A shell that reads the updater on stdin runs it.
     ['cat openaudible-autoupdate.sh | bash', 'stdin'],
@@ -479,4 +492,12 @@ test('still blocks when the hook is invoked through a symlinked path', () => {
     const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'sudo true' } });
     const r = spawnSync(process.execPath, [link], { input, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: PROJECT } });
     assert.equal(r.status, 2, r.stderr);
+});
+
+test('an internal error fails closed (exit 2), not open', () => {
+    const code = `import { main } from ${JSON.stringify(HOOK)}; main(() => { throw new Error('boom'); });`;
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git status' } });
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { input, encoding: 'utf8' });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /internal error \(boom\); blocking \(fail closed\)/);
 });
