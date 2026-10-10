@@ -9,7 +9,8 @@
 # That is acceptable here, and avoids a privileged trigger. The job is skipped
 # for fork PRs so they do not show a red check.
 #
-# Labels (`area/*`) must exist already; `sync-labels` removes a label when its
+# Labels (`area/*`) missing from the repository are created on first use (default
+# colour, no description); `sync-labels` removes a label when its
 # paths are no longer touched. Issues are not labeled by path; they have none.
 
 name: Labeler

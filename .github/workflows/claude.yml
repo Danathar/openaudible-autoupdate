@@ -13,6 +13,16 @@
 #   (The agent allowlist names git subcommands; a bare `git:*` would permit
 #   `git -c alias.x=!cmd x`, and `git fetch`/`git push` prefixes would permit
 #   `--upload-pack`/`--receive-pack` command options. Pushes are exact.)
+#   The allowlist is a speed bump, not a sandbox. It keeps the agent from
+#   casually running `gh api -X PUT .../merge`, git aliases or `--receive-pack`,
+#   but it cannot stop code the agent writes itself: Edit/Write plus
+#   `bats tests/unit` executes arbitrary shell, so treat everything the agent
+#   reads (issue bodies, comments) as a possible prompt injection. Mitigations:
+#   only maintainers can trigger a run, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'`
+#   strips credentials from subprocess environments, and branch protection
+#   (required checks, no bypass) still gates anything the agent pushes. The
+#   checkout token stays in `.git/config`, so a pushed branch other than main
+#   is the worst reachable write.
 #   4. If neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN is configured,
 #      the job writes a step summary saying so and skips the agent. It does
 #      not fail red. Set exactly one of the two secrets.
@@ -26,6 +36,13 @@
 # AGENTS.md; review standards live in docs/review-rubric.md. The prompt below
 # repeats the rules that matter most: the updater script installs packages with
 # sudo, so it is never run for real, only against stubs or in a container.
+#
+# Checks on agent pushes: commits pushed and PRs opened with the workflow's
+# GITHUB_TOKEN do not start other workflows (a GitHub rule against recursive
+# runs), so `CI` and `Coverage gate` will not run on what the agent pushes. No
+# PAT is used on purpose. The agent's closing comment tells the maintainer to
+# re-run checks (close and reopen the PR, or push an empty commit by hand);
+# the required checks stay pending until then.
 
 name: Claude
 
@@ -165,11 +182,30 @@ jobs:
           sed -i 's/^          //' "$RUNNER_TEMP/gh-review-read.sh"
           chmod 0755 "$RUNNER_TEMP/gh-review-read.sh"
 
+      # The runner image has no bats and a drifting shellcheck; install what
+      # the agent is told to run (same pins as ci.yml's lint and unit jobs).
+      - name: Install bats and pinned shellcheck
+        if: steps.target.outputs.proceed == 'true' && steps.auth.outputs.configured == 'true'
+        env:
+          SHELLCHECK_VERSION: v0.11.0
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats jq
+          curl -fsSL -o "$RUNNER_TEMP/shellcheck.tar.xz" \
+            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  $RUNNER_TEMP/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/shellcheck-${SHELLCHECK_VERSION}" >> "$GITHUB_PATH"
+
       # anthropics/claude-code-action v1.0.248 (annotated tag dereferenced to
       # its commit). Input names checked against that release's action.yml.
       - name: Run Claude Code
         if: steps.target.outputs.proceed == 'true' && steps.auth.outputs.configured == 'true'
         uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
+        env:
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -178,5 +214,5 @@ jobs:
             actions: read
           claude_args: >-
             --max-turns 30
-            --append-system-prompt "Read AGENTS.md first. Every gh pr, gh issue, gh release and gh workflow command must pass --repo Danathar/openaudible-autoupdate; PRs use --base main. Never run openaudible-autoupdate.sh against the real system: it runs sudo dnf install. Exercise it only with stubbed commands on PATH (tests/unit/helpers.bash has the bats stubs) or inside a throwaway container. Never weaken the sha256 verification, the set -euo pipefail handling, or the manifest field checks in openaudible-autoupdate.sh. Before committing a script change run bats tests/unit and shellcheck openaudible-autoupdate.sh. Judge review findings by docs/review-rubric.md: verify each claim against the code before acting, and say so when a finding is wrong or not actionable. Do not merge pull requests."
-            --allowedTools "Edit,Write,Read,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(gh pr create --repo Danathar/openaudible-autoupdate:*),Bash(gh pr view --repo Danathar/openaudible-autoupdate:*),Bash(gh pr comment --repo Danathar/openaudible-autoupdate:*),Bash(gh issue view --repo Danathar/openaudible-autoupdate:*),Bash(${{ runner.temp }}/gh-review-read.sh:*),Bash(gh issue comment --repo Danathar/openaudible-autoupdate:*),Bash(bats tests/unit:*),Bash(shellcheck:*),Bash(bash -n:*),Bash(node --test:*)"
+            --append-system-prompt "Read AGENTS.md first. Every gh pr, gh issue, gh release and gh workflow command must pass --repo Danathar/openaudible-autoupdate; PRs use --base main. Never run openaudible-autoupdate.sh against the real system: it runs sudo dnf install. Exercise it only with stubbed commands on PATH (tests/unit/helpers.bash has the bats stubs) or inside a throwaway container. Never weaken the sha256 verification, the set -euo pipefail handling, or the manifest field checks in openaudible-autoupdate.sh. Before committing a script change run bats tests/unit and shellcheck openaudible-autoupdate.sh. Judge review findings by docs/review-rubric.md: verify each claim against the code before acting, and say so when a finding is wrong or not actionable. Do not merge pull requests. Pushes and PRs made with the workflow token do not start CI: whenever you push or open a PR, say in your final comment that a maintainer must re-run the checks (close and reopen the PR, or push an empty commit) before the required checks can pass."
+            --allowedTools "Edit,Write,Read,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(gh pr create --repo Danathar/openaudible-autoupdate:*),Bash(gh pr view --repo Danathar/openaudible-autoupdate:*),Bash(gh pr comment --repo Danathar/openaudible-autoupdate:*),Bash(gh issue view --repo Danathar/openaudible-autoupdate:*),Bash(${{ runner.temp }}/gh-review-read.sh:*),Bash(gh issue comment --repo Danathar/openaudible-autoupdate:*),Bash(bats tests/unit:*),Bash(shellcheck:*),Bash(bash -n:*),Bash(node --test scripts/tests/),Bash(node --test .claude/hooks/tests/)"

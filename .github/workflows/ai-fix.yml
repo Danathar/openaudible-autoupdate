@@ -33,6 +33,21 @@
 # reaches a PR without it. The `pull_request: labeled` trigger gets a
 # read-only token for fork PRs, and the same-repository test below skips them.
 #
+# The allowlist is a speed bump, not a sandbox. It keeps the agent from casually
+# running `gh api -X PUT .../merge`, git aliases or `--receive-pack`, but it
+# cannot stop code the agent writes itself (Edit/Write plus `bats tests/unit`
+# runs arbitrary shell). Treat everything the agent reads as a possible prompt
+# injection. Mitigations: only maintainers can trigger a run,
+# `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'` strips credentials from subprocess
+# environments, and branch protection still gates what is pushed.
+#
+# Checks on agent pushes: commits pushed and PRs opened with the workflow's
+# GITHUB_TOKEN do not start other workflows (a GitHub rule against recursive
+# runs), so `CI` and `Coverage gate` will not run on what the agent pushes. No
+# PAT is used on purpose. The agent's closing comment tells the maintainer to
+# re-run checks (close and reopen the PR, or push an empty commit by hand);
+# the required checks stay pending until then.
+#
 # Rules for the agent are in AGENTS.md; gh write commands use
 # `--repo Danathar/openaudible-autoupdate`. The updater script runs `sudo dnf install`, so the
 # agent is told never to run it for real (stubs or a throwaway container only).
@@ -198,6 +213,23 @@ jobs:
           sed -i 's/^          //' "$RUNNER_TEMP/gh-review-read.sh"
           chmod 0755 "$RUNNER_TEMP/gh-review-read.sh"
 
+      # The runner image has no bats and a drifting shellcheck; install what
+      # the agent is told to run (same pins as ci.yml's lint and unit jobs).
+      - name: Install bats and pinned shellcheck
+        if: steps.target.outputs.proceed == 'true' && steps.auth.outputs.configured == 'true'
+        env:
+          SHELLCHECK_VERSION: v0.11.0
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats jq
+          curl -fsSL -o "$RUNNER_TEMP/shellcheck.tar.xz" \
+            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  $RUNNER_TEMP/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/shellcheck-${SHELLCHECK_VERSION}" >> "$GITHUB_PATH"
+
       # anthropics/claude-code-action v1.0.248 (annotated tag dereferenced to
       # its commit). Input names checked against that release's action.yml.
       # A `prompt` runs the action in agent mode, so no @claude mention is needed.
@@ -205,6 +237,7 @@ jobs:
         if: steps.target.outputs.proceed == 'true' && steps.auth.outputs.configured == 'true'
         uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
         env:
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
           TARGET_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -221,8 +254,8 @@ jobs:
             2. For each finding, verify the claim against the code at this checkout. Judge it by docs/review-rubric.md. Skip, and say why, any finding that is wrong, not actionable, or needs a merge order instead of a code change.
             3. For a pull request, commit the fixes to the checked-out head branch and push with exactly `git push -u origin HEAD` (no other push form is permitted). For an issue, create a branch from main with `git switch -c <branch>`, push with exactly `git push -u origin HEAD`, then open a PR with `gh pr create --repo Danathar/openaudible-autoupdate --base main --head <branch>`.
             4. Before committing a change to openaudible-autoupdate.sh, run `bats tests/unit` and `shellcheck openaudible-autoupdate.sh`. Follow CLAUDE.md for style. Do not merge anything.
-            5. Finish with one comment (`gh issue comment --repo Danathar/openaudible-autoupdate` or `gh pr comment --repo Danathar/openaudible-autoupdate`) listing which findings you applied and which you rejected, with the reason for each.
+            5. Finish with one comment (`gh issue comment --repo Danathar/openaudible-autoupdate` or `gh pr comment --repo Danathar/openaudible-autoupdate`) listing which findings you applied and which you rejected, with the reason for each. Pushes and PRs made with the workflow token do not start CI, so if you pushed or opened a PR, end the comment by telling the maintainer to re-run the checks (close and reopen the PR, or push an empty commit) before the required checks can pass.
           claude_args: >-
             --max-turns 40
             --append-system-prompt "Work only on Danathar/openaudible-autoupdate, pass --repo Danathar/openaudible-autoupdate to every gh write command, push only to origin, never run openaudible-autoupdate.sh against the real system (it runs sudo dnf install), never weaken checksum verification. See AGENTS.md."
-            --allowedTools "Edit,Write,Read,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(gh pr create --repo Danathar/openaudible-autoupdate:*),Bash(gh pr view --repo Danathar/openaudible-autoupdate:*),Bash(gh pr comment --repo Danathar/openaudible-autoupdate:*),Bash(gh issue view --repo Danathar/openaudible-autoupdate:*),Bash(${{ runner.temp }}/gh-review-read.sh:*),Bash(gh issue comment --repo Danathar/openaudible-autoupdate:*),Bash(bats tests/unit:*),Bash(shellcheck:*),Bash(bash -n:*),Bash(node --test:*)"
+            --allowedTools "Edit,Write,Read,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git push origin HEAD),Bash(git push -u origin HEAD),Bash(gh pr create --repo Danathar/openaudible-autoupdate:*),Bash(gh pr view --repo Danathar/openaudible-autoupdate:*),Bash(gh pr comment --repo Danathar/openaudible-autoupdate:*),Bash(gh issue view --repo Danathar/openaudible-autoupdate:*),Bash(${{ runner.temp }}/gh-review-read.sh:*),Bash(gh issue comment --repo Danathar/openaudible-autoupdate:*),Bash(bats tests/unit:*),Bash(shellcheck:*),Bash(bash -n:*),Bash(node --test scripts/tests/),Bash(node --test .claude/hooks/tests/)"

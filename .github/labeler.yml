@@ -1,5 +1,6 @@
 # Path to label map for actions/labeler v5 (.github/workflows/labeler.yml).
-# Labels must already exist in the repository; the labeler does not create them.
+# Labels that do not exist yet are created by the labeler on first use (with
+# the default colour and no description); create them by hand first to set both.
 
 'area/script':
   - changed-files:
