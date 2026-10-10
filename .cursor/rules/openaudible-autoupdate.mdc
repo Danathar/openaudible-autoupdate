@@ -6,7 +6,7 @@ alwaysApply: true
 Full rules are in `AGENTS.md`; read it first. Essentials:
 
 - One Bash script (`openaudible-autoupdate.sh`) plus systemd user units in `systemd/`. It reads OpenAudible's manifest (`VERSION_URL`, `PKG_NAME`, `PLATFORM_KEY`), verifies sha256, then runs `sudo dnf install -y`.
-- Never run the script for real. Use stubbed commands (`bats tests/unit`) or containers (`tests/e2e/run.sh`).
+- Never run the script for real. Use stubbed commands (`bats tests/unit`) or containers (`bash tests/e2e/run.sh`).
 - Never remove, skip or soften the sha256 verification; never add `--nogpgcheck` or `curl -k`.
 - Keep `set -euo pipefail`; run `git ls-files -z '*.sh' '*.bash' '*.bats' | xargs -0 shellcheck` and `bats tests/unit` before finishing.
 - Conventional Commits; `gh` commands need `--repo Danathar/openaudible-autoupdate`.

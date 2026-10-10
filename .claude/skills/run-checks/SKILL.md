@@ -13,7 +13,7 @@ bats tests/unit
 ```
 
 If the change touches download, checksum, or `dnf install`, also run the
-container tests: `tests/e2e/run.sh` (needs podman or docker). After editing
+container tests: `bash tests/e2e/run.sh` (needs podman or docker). After editing
 agent docs/policies/workflows also run `node scripts/check-policies.mjs`.
 Any `gh` command: pass `--repo Danathar/openaudible-autoupdate`.
 

@@ -39,15 +39,17 @@ Licence: GPL-3.0-only (see `LICENSE`). Default branch: `main`.
 | `tests/e2e/` | Container end-to-end test: `run.sh` (host side), `in-container.sh` |
 | `.shellcheckrc`, `.coverage-thresholds.json` | Lint config; coverage floor |
 | `scripts/coverage-gate.mjs` | Coverage gate used by `.github/workflows/coverage-gate.yml` |
-| `.github/workflows/ci.yml` | CI; its jobs are the required checks |
+| `.github/workflows/ci.yml` | CI; its four jobs plus `Coverage gate` (`coverage-gate.yml`) are the required checks (active ruleset 24826574, see `docs/branch-protection.md`) |
 
 ## Hard rules
 
 - **NEVER run `openaudible-autoupdate.sh` for real on a host or dev machine.**
   The success path runs `sudo dnf install -y` and changes the system. Run it
-  only with stubbed `curl`/`rpm`/`dnf`/`sudo`/`sha256sum` earlier on `PATH`
-  (that is what `tests/unit` does) or inside a throwaway container
-  (`tests/e2e/run.sh`). Never use `/tmp` for scratch work in this owner's
+  only with stubbed commands on a private `PATH` (`tests/unit` stubs `rpm`,
+  `curl`, `sudo`, `dnf`, `notify-send` and `systemd-cat`; `sha256sum`, `jq`
+  and `awk` stay real) or inside a throwaway container
+  (`bash tests/e2e/run.sh`). Never run `tests/e2e/in-container.sh` directly:
+  it installs as root and is meant only to run inside the container. Never use `/tmp` for scratch work in this owner's
   environment; use `/var/tmp/<name>-*`.
 - **The checksum check must stay between download and install.** Never
   reorder, skip, soften, or make non-fatal the `sha256sum` comparison. Never
@@ -71,7 +73,7 @@ Licence: GPL-3.0-only (see `LICENSE`). Default branch: `main`.
 | `PLATFORM_KEY` | `linux_x86_64_rpm` | Key under `.platforms` |
 
 Required commands (checked up front, exit 1 if missing): `curl jq rpm sudo
-dnf sha256sum`. Optional: `systemd-cat`, `notify-send`.
+dnf sha256sum awk`. Optional: `systemd-cat`, `notify-send`.
 
 ## Deployment context
 
@@ -91,7 +93,7 @@ dnf sha256sum`. Optional: `systemd-cat`, `notify-send`.
 ```bash
 git ls-files -z '*.sh' '*.bash' '*.bats' | xargs -0 shellcheck   # lint, config in .shellcheckrc
 bats tests/unit                  # unit tests, stub commands only
-tests/e2e/run.sh                 # needs podman or docker; see below
+bash tests/e2e/run.sh            # needs podman or docker; see below
 ```
 
 `tests/e2e/run.sh` builds dummy OpenAudible rpms in a throwaway Fedora
@@ -129,10 +131,13 @@ scripts.
 ## Session continuity
 
 Session state lives in `.claude/session-summary.md`. At the start of work
-read it, `.claude/memory/` and recent `git log`; before ending a session
-update the summary with what was done, what is in flight (branch, PR), and
-next steps. Record durable lessons in `.claude/memory/`, not in chat. Any
-agent (not only Claude) should treat these as the shared handoff point.
+read it, `.claude/memory/` and recent `git log`. Only the session that lands
+work on `main` rewrites the summary (see the end-of-session rule at the top
+of that file); a session that opens a PR to be merged later puts its notes
+(what was done, what is in flight, next steps) in the PR body instead, so
+concurrent PRs do not conflict. Record durable lessons in `.claude/memory/`,
+not in chat. Any agent (not only Claude) should treat these as the shared
+handoff point.
 
 ## Pull requests
 

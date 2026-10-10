@@ -17,4 +17,4 @@ reviewable.
    `git tag`/`gh release create --repo Danathar/openaudible-autoupdate` unless
    explicitly asked.
 5. Never run the updater to "smoke test" the release; use `bats tests/unit` and
-   `tests/e2e/run.sh`.
+   `bash tests/e2e/run.sh`.

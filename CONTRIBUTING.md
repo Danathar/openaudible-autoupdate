@@ -9,7 +9,7 @@ Contributions are licensed GPL-3.0-only, like the rest of the repo.
 
 - **Do not run `openaudible-autoupdate.sh` for real on your machine to test
   a change.** Its success path runs `sudo dnf install -y`. Use the stubbed
-  tests (`tests/unit`) or a throwaway container (`tests/e2e/run.sh`).
+  tests (`tests/unit`) or a throwaway container (`bash tests/e2e/run.sh`).
 - The sha256 verification before install is a security control. Changes that
   weaken it (or add `--nogpgcheck`, `curl -k`) will not be accepted without
   maintainer sign-off.
@@ -28,11 +28,11 @@ Requirements for development: `bash`, [`shellcheck`](https://www.shellcheck.net/
 ```bash
 git ls-files -z '*.sh' '*.bash' '*.bats' | xargs -0 shellcheck
 bats tests/unit
-node scripts/check-policies.mjs
+node scripts/check-policies.mjs   # also run by .github/workflows/policy-check.yml
 ```
 
 If you touched the download, checksum, or install path, also run
-`tests/e2e/run.sh`. CI (`.github/workflows/ci.yml`) runs the same checks.
+`bash tests/e2e/run.sh`. CI (`.github/workflows/ci.yml`, plus `coverage-gate.yml` and `policy-check.yml`) runs the same checks.
 Add or update a bats test for each behaviour change and update the README if
 user-visible behaviour or configuration changes.
 
