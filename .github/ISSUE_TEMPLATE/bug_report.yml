@@ -1,0 +1,55 @@
+name: Bug report
+description: The updater failed, misbehaved, or did nothing when it should have acted
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not paste secrets. Security problems: use the private "Report a vulnerability" option on the Security tab.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Script output
+      description: Output of `journalctl --user -u openaudible-autoupdate.service` from the normal timer/service run. Do not run the updater manually just to produce logs; it ends in `sudo dnf install -y`.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Install mode
+      options:
+        - Host (script and OpenAudible rpm on the same system)
+        - distrobox/toolbox (timer on host, ExecStart wraps `distrobox enter`)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distro and version
+      description: For example Fedora 42, Aurora, Bluefin; for containers, the container's distro too.
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Installed OpenAudible version and manifest version
+      description: "`rpm -q OpenAudible` and the `version` field from the manifest."
+  - type: textarea
+    id: config
+    attributes:
+      label: Overrides
+      description: Any `VERSION_URL`, `PKG_NAME`, `PLATFORM_KEY` overrides, and any local systemd drop-in.
+      render: text
+  - type: input
+    id: commit
+    attributes:
+      label: Script version
+      description: Commit SHA or date of the copy of `openaudible-autoupdate.sh` you installed.

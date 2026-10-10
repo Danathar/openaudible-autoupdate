@@ -6,3 +6,6 @@
 
 # Local coverage output (kcov)
 coverage/
+
+# Scratch sandbox for the test-against-fake-manifest skill
+tests/.fake-host/
