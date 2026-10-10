@@ -33,6 +33,17 @@
 //   - git push with force, --mirror, a remote other than `origin`, a URL
 //     remote, or no explicit remote.
 //   - git config / git remote changes that re-point `origin` or push URLs.
+//   - git options that write a file, read outside the repository or run a
+//     program on the pre-approved read commands: --output[=FILE], --no-index,
+//     --ext-diff, git grep -O/--open-files-in-pager, --exec-path=DIR, and
+//     `-c` keys such as diff.external, core.pager, alias.*; GIT_* / PAGER /
+//     EDITOR variables (inline or exported) other than identity and no-op
+//     pagers (GIT_EXTERNAL_DIFF=, GIT_TRACE=FILE, GIT_DIR=, ...).
+//   node
+//   - `node --test` with any option outside the test-runner allowlist
+//     (--import, --require/-r, --loader, module reporters,
+//     --test-reporter-destination=FILE, ...), and node with NODE_OPTIONS or
+//     another NODE_* variable set inline or exported.
 //   Updater and host-modifying commands
 //   - Executing openaudible-autoupdate.sh (or the installed
 //     `openaudible-autoupdate` name): directly, via bash/sh/zsh/dash, source,
@@ -616,6 +627,41 @@ function checkPrCreate(args) {
 // git config keys that can redirect where a push goes or how it authenticates.
 // (push.* keys such as push.default or push.autoSetupRemote cannot change the target.)
 const RISKY_GIT_CONFIG = /^(remote\.|url\.|credential\.|core\.sshcommand$)/i;
+// `-c` keys that make git run a program or read config from elsewhere
+// (`git -c diff.external=prog diff`, `-c core.pager=...`, `-c alias.x=!cmd`).
+const EXEC_GIT_CONFIG =
+    /^(core\.(pager|editor|fsmonitor|hookspath|askpass|gitproxy|attributesfile)$|diff\.|pager\.|alias\.|sequence\.editor$|gpg\.|filter\.|merge\.|interactive\.|include\.|includeif\.|uploadpack\.)/i;
+// Options that turn a read-only git command (`git diff|log|show`, allow-listed in
+// .claude/settings.json) into a file write (`--output=FILE`), a read of any path
+// on disk (`--no-index`) or a program run (`--ext-diff`, git grep's
+// `--open-files-in-pager`). git rejects abbreviations of these diff options
+// (`--outp=` exits 128/129 and writes nothing), so the full spelling is enough;
+// `--output-indicator-*` and `--no-ext-diff` do not match.
+const REFUSED_GIT_OPTION = /^--(?:output|no-index|ext-diff|open-files-in-pager)(?:=|$)/;
+
+// Environment variables git or node read to run a program, load code, write a
+// file or switch repository/config (`GIT_EXTERNAL_DIFF=prog git diff`,
+// `GIT_TRACE=FILE`, `GIT_DIR=...`, `NODE_OPTIONS=--import=...`,
+// `NODE_V8_COVERAGE=DIR`). Fail closed: every GIT_* / NODE_* name is refused
+// unless SAFE_ENV lists it.
+const WATCHED_ENV = /^(GIT_|NODE_|PAGER$|EDITOR$|VISUAL$|LESSOPEN$|LESSCLOSE$)/;
+const SAFE_ENV = new Set([
+    'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_AUTHOR_DATE', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL',
+    'GIT_COMMITTER_DATE', 'GIT_TERMINAL_PROMPT', 'GIT_OPTIONAL_LOCKS', 'GIT_MERGE_AUTOEDIT', 'GIT_FLUSH',
+    'NODE_ENV', 'NODE_NO_WARNINGS', 'NODE_DISABLE_COLORS',
+]);
+// Program-valued variables that are harmless only with a no-op value (`GIT_PAGER=cat`).
+const PROGRAM_ENV = new Set(['GIT_PAGER', 'PAGER', 'GIT_EDITOR', 'GIT_SEQUENCE_EDITOR', 'EDITOR', 'VISUAL']);
+const NOOP_PROGRAMS = new Set(['', 'cat', 'true', ':']);
+
+/** Name of the first risky variable in an env map ({ NAME: value | null }), or undefined. */
+function riskyEnv(env) {
+    return Object.keys(env).find((k) => {
+        if (!WATCHED_ENV.test(k) || SAFE_ENV.has(k)) return false;
+        if (PROGRAM_ENV.has(k)) return !NOOP_PROGRAMS.has(env[k]);
+        return true;
+    });
+}
 
 function checkGit(args, inlineEnv = {}, exported = {}) {
     // Walk global options to find the subcommand, vetting `-c key=value`.
@@ -628,16 +674,37 @@ function checkGit(args, inlineEnv = {}, exported = {}) {
         if (configKey !== null && RISKY_GIT_CONFIG.test(configKey)) {
             return block(`Blocked: \`git ${a} ${configKey}=...\` could redirect pushes or credentials.`);
         }
+        if (configKey !== null && EXEC_GIT_CONFIG.test(configKey)) {
+            return block(`Blocked: \`git ${a} ${configKey}=...\` makes git run a program or read other config.`);
+        }
+        if (a.startsWith('--exec-path=')) {
+            return block('Blocked: `git --exec-path=DIR` runs git commands from another directory.');
+        }
         i += ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'].includes(a) ? 2 : 1;
     }
     const sub = args[i];
     const rest = args.slice(i + 1);
 
+    const env = { ...exported, ...inlineEnv };
     if (sub === 'push') {
-        const envKey = Object.keys({ ...exported, ...inlineEnv }).find((k) => /^(GIT_CONFIG_|GIT_SSH)/i.test(k));
-        if (envKey) return block(`Blocked: \`git push\` with ${envKey}= could redirect the push.`);
-        return checkGitPush(rest);
+        const pushKey = Object.keys(env).find((k) => /^(GIT_CONFIG_|GIT_SSH)/i.test(k));
+        if (pushKey) return block(`Blocked: \`git push\` with ${pushKey}= could redirect the push.`);
     }
+    const envKey = riskyEnv(env);
+    if (envKey) {
+        return block(
+            `Blocked: \`git\` with ${envKey} set; it can make git run a program, write a file or read another repository/config. ` +
+                'Only GIT_AUTHOR_*/GIT_COMMITTER_* identity and PAGER/GIT_PAGER/GIT_EDITOR=cat|true are allowed.'
+        );
+    }
+    const refused = args.find((a) => REFUSED_GIT_OPTION.test(a)) ?? (sub === 'grep' ? rest.find((a) => /^-[a-zA-Z]*O/.test(a)) : undefined);
+    if (refused !== undefined) {
+        return block(
+            `Blocked: \`git ${sub ?? ''} ${refused}\` writes a file, reads outside the repository or runs a program. ` +
+                'Read the output on stdout instead (pipe it, or use the Write tool to save it).'
+        );
+    }
+    if (sub === 'push') return checkGitPush(rest);
     if (sub === 'remote') return checkGitRemote(rest);
     if (sub === 'config') return checkGitConfig(rest);
     return null;
@@ -759,6 +826,70 @@ function checkGitRemote(rest) {
 }
 
 // ---------------------------------------------------------------------------
+// node --test
+// ---------------------------------------------------------------------------
+
+// `node --test` is pre-approved in .claude/settings.json, but node options load
+// and run any code (`--import`, `--require`/`-r`, `--loader`, a module
+// `--test-reporter`, `--test-global-setup`, `--experimental-config-file`) or
+// write files (`--test-reporter-destination=FILE`, `--cpu-prof-dir`,
+// `--redirect-warnings`). In test mode only the test-runner options below are
+// allowed; everything else, and any NODE_* variable such as NODE_OPTIONS, is
+// refused. Value: null = any value, RegExp = the value must match.
+const NODE_TEST_OPTIONS = {
+    '--test': false,
+    '--test-only': false,
+    '--watch': false,
+    '--test-force-exit': false,
+    '--experimental-test-coverage': false,
+    '--no-warnings': false,
+    '--enable-source-maps': false,
+    '--test-name-pattern': null,
+    '--test-skip-pattern': null,
+    '--test-coverage-include': null,
+    '--test-coverage-exclude': null,
+    '--test-concurrency': /^\d+$/,
+    '--test-timeout': /^\d+$/,
+    '--test-shard': /^\d+\/\d+$/,
+    '--test-isolation': /^(process|none)$/,
+    '--experimental-test-isolation': /^(process|none)$/,
+    '--test-coverage-lines': /^\d+(\.\d+)?$/,
+    '--test-coverage-branches': /^\d+(\.\d+)?$/,
+    '--test-coverage-functions': /^\d+(\.\d+)?$/,
+    '--test-reporter': /^(spec|tap|dot|junit|lcov)$/,
+    '--test-reporter-destination': /^(stdout|stderr)$/,
+};
+
+function checkNode(cmd, args, env) {
+    const envKey = Object.keys(env).find((k) => /^NODE_/.test(k) && !SAFE_ENV.has(k));
+    if (envKey) {
+        return block(`Blocked: \`${cmd}\` with ${envKey} set; NODE_OPTIONS and other NODE_* variables can load code or write files.`);
+    }
+    if (!args.includes('--test')) return null; // not the pre-approved test runner; Claude Code asks
+    for (let i = 0; i < args.length; i++) {
+        const a = args[i];
+        if (!a.startsWith('-') || a === '-' || a === '--') continue; // test files / patterns
+        const eq = a.indexOf('=');
+        const name = eq === -1 ? a : a.slice(0, eq);
+        const rule = Object.hasOwn(NODE_TEST_OPTIONS, name) ? NODE_TEST_OPTIONS[name] : undefined;
+        let ok = rule !== undefined;
+        if (ok && rule === false) ok = eq === -1;
+        else if (ok) {
+            const value = eq === -1 ? args[++i] : a.slice(eq + 1);
+            ok = value !== undefined && (rule === null || rule.test(value));
+        }
+        if (!ok) {
+            return block(
+                `Blocked: \`${cmd} --test ... ${a}\`; only test-runner options (name/skip pattern, concurrency, timeout, shard, ` +
+                    'isolation, coverage, --watch, --test-only, reporters spec|tap|dot|junit|lcov to stdout|stderr) are allowed. ' +
+                    'Other node options can run code (--import, --require, --loader, module reporters) or write files.'
+            );
+        }
+    }
+    return null;
+}
+
+// ---------------------------------------------------------------------------
 // Updater / host-modifying commands
 // ---------------------------------------------------------------------------
 
@@ -768,7 +899,7 @@ const CONTAINER_ENTER = new Set(['distrobox', 'distrobox-enter', 'distrobox-host
 const CONTAINER_ENGINES = new Set(['podman', 'docker', 'nerdctl']);
 // Words a wrapper (env, timeout, xargs, ...) can hide; we look through the wrapper to them.
 const LOOKTHROUGH = new Set([
-    'gh', 'git', ...SHELLS, 'eval', 'source', 'rpm', 'rpm-ostree', 'bootc', 'pkcon', 'systemctl', 'systemd-run',
+    'gh', 'git', 'node', 'nodejs', ...SHELLS, 'eval', 'source', 'rpm', 'rpm-ostree', 'bootc', 'pkcon', 'systemctl', 'systemd-run',
     ...PRIVILEGE, 'flatpak-spawn', ...DNF, ...CONTAINER_ENTER, ...CONTAINER_ENGINES,
 ]);
 
@@ -1019,7 +1150,12 @@ function checkSegment(words, state) {
         for (const a of args) {
             if (a.startsWith('GH_REPO=')) state.exportedGhRepo = a.slice(8);
             if (a.startsWith('PATH=')) state.exportedPath = a.slice(5);
-            if (/^(GIT_CONFIG_|GIT_SSH)/i.test(a)) (state.exportedEnv ??= {})[a.split('=')[0]] = a;
+            // `export NAME` without a value exports an earlier assignment: value unknown (null).
+            const eq = a.indexOf('=');
+            const name = eq === -1 ? a : a.slice(0, eq);
+            if (/^(GIT_CONFIG_|GIT_SSH)/i.test(name) || WATCHED_ENV.test(name)) {
+                (state.exportedEnv ??= {})[name] = eq === -1 ? null : a.slice(eq + 1);
+            }
         }
         return null;
     }
@@ -1028,6 +1164,7 @@ function checkSegment(words, state) {
         return checkGh(args, envRepo);
     }
     if (cmd === 'git') return checkGit(args, inlineEnv, state.exportedEnv ?? {});
+    if (cmd === 'node' || cmd === 'nodejs') return checkNode(cmd, args, { ...(state.exportedEnv ?? {}), ...inlineEnv });
     if (isScriptName(w[0])) return checkUpdaterRun(envPath, state, `Running ${w[0]}`);
     if (cmd === 'source' || cmd === '.') {
         return args.some(isScriptName) ? checkUpdaterRun(envPath, state, `Sourcing ${args.find(isScriptName)}`) : null;
