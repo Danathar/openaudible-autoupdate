@@ -23,7 +23,7 @@ the evidence on tududi's side.
   `gh discussion` treated as an unknown group; `origin` re-pointed to a
   non-upstream URL; `sh -c -- '...'`; `gh api graphql --input file`; repeated
   `--repo` flags where gh honours the last; `git remote remove origin && git
-  remote add origin ...`; `gh pr create` without `--base main` (P2); `git -c
+  remote add origin ...`; a PR created without `--base main` (P2); `git -c
   remote.origin.pushurl=...`; `env -S '...'`; `gh alias set` followed by the
   alias. Each was fixed with a test. The reply that settled the last one
   records the decision: the fix was to fail closed for unlisted `gh` groups, so

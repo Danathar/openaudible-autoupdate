@@ -23,8 +23,9 @@ the paths that mean to exit 0 (lines 28-29 "not installed via rpm", lines
 container or test environment without `systemd-cat` reports every run as a
 failure, with no message about why.
 **Status:** fixed by the foundation PR, `Danathar/openaudible-autoupdate#54`
-(`log()` and the `notify-send` line both become `if ...; then ...; fi`); it was
-open, not merged, when this was written. If `main`'s `log()` still ends in `&&`,
-the fix has not landed. Delete this entry or rewrite it as history once it has.
+(`log()` (line 20) and the separate `notify-send` conditional (line 70) both
+become `if ...; then ...; fi`), which merges ahead of the PR that added this
+entry. If `main`'s `log()` still ends in `&&`, the fix has not landed. Once it
+has, rewrite this entry as history or delete it.
 **Evidence:** `openaudible-autoupdate.sh:9,18-21,70` at `d769ba1` (unchanged
 since the first commit `6caac1b`); PR #54's diff of `openaudible-autoupdate.sh`.

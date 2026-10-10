@@ -66,7 +66,7 @@ agent-learning issues (#16, #21-#24, #32, #33, #38). It describes `main` at
 - **Known defects on `main`:** `log()` returns 1 when `systemd-cat` is missing
   and kills the run under `set -e` (see
   [memory/log-and-list-under-set-e.md](memory/log-and-list-under-set-e.md));
-  fixed in PR #54, not merged when this was written. The version check is
+  fixed in PR #54, which merges ahead of this PR. The version check is
   equality, not "newer" ([memory/version-check-is-equality.md](memory/version-check-is-equality.md)).
 - **ACMM rollout:** the fifty `[ACMM ...]` issues are being worked as seven
   slices, one PR each against `main`: #51 (agent directions), #52 (autonomy
@@ -93,8 +93,10 @@ permission settings, five memory entries, this file, and the first reflection.
 **Watch:** the hook's stubs-on-`PATH` exemption needs a committed directory
 `tests/<dir>` holding executable `sudo`, `dnf` and `rpm`. The foundation PR
 (#54) does not have one: its bats helpers build stubs in `$BATS_TEST_TMPDIR`
-at run time and its e2e test runs in `podman run`, both of which the hook
-allows. So the exemption only matters for a hand-run
+at run time, and `bats` never names the script on the command line. Its e2e
+test runs through `tests/e2e/run.sh` in `podman run`. Both pass the hook, but
+the hook allows container runs of the updater only when the command contains a
+`tests/e2e` path. So the stubs exemption only matters for a hand-run
 `PATH=tests/<dir>:$PATH ./openaudible-autoupdate.sh`, which no file in #54
 sets up.
 

@@ -38,26 +38,27 @@
 //     `openaudible-autoupdate` name): directly, via bash/sh/zsh/dash, source,
 //     `.`, env/timeout/xargs/other wrappers, systemd-run, or via
 //     `distrobox enter` / `toolbox run`. The only exemptions are:
-//       1. a container run: `podman run ...` / `docker run ...` (the script
-//          then runs against the container's own throwaway rpm database; the
-//          command word is podman/docker, so it is never analysed as the
-//          script), and
+//       1. the e2e harness: `podman run ...` / `docker run ...` with a
+//          `tests/e2e` path (the script then runs against the container's own
+//          throwaway rpm database), and
 //       2. an inline `PATH=<dir>[:...]` (or `export PATH=...`) whose FIRST
 //          entry is a directory under a `tests/` path component, contains no
 //          `..`, and, when it can be resolved on disk, holds executable
 //          stubs for at least `sudo`, `dnf` and `rpm`. Stubs shadow the real
 //          commands, so nothing is installed.
-//     distrobox/toolbox enter the developer's real long-lived container, so
-//     they never qualify for either exemption. `podman exec` / `docker exec`
-//     are refused for the same reason (distrobox containers are podman
-//     containers). `sh -n` / `bash -n` (syntax check) and tools that merely
+//     `distrobox enter` / `toolbox run|enter` / `distrobox-enter` are refused
+//     outright: they enter the developer's real long-lived container.
+//     `podman exec` / `docker exec` are refused for the same reason (distrobox
+//     containers are podman containers). A `podman|docker run` whose arguments
+//     mention the updater is allowed only when they also contain a
+//     `tests/e2e` path. `sh -n` / `bash -n` (syntax check) and tools that merely
 //     read the file (shellcheck, cat, grep, bats, ...) are fine.
 //   - sudo / doas / pkexec in any position of a wrapper chain.
 //   - dnf/dnf5/yum/microdnf subcommands other than read-only queries (list,
 //     info, search, repoquery, provides, check-update, repolist, ...).
 //   - rpm install/upgrade/freshen/erase modes (-i -U -F -e and long forms);
 //     query (-q), verify (-V) and checksig (-K) modes are fine.
-//   - rpm-ostree and bootc subcommands other than status/db/search/--version.
+//   - (rpm -U/-F/-e/--install/... are refused even when a query flag is also present.)
 //   - systemctl enable/start/restart/link/... of anything named
 //     openaudible-autoupdate*, with or without --user.
 //
@@ -76,7 +77,7 @@ export const SCRIPT = 'openaudible-autoupdate';
 
 const GUIDANCE =
     'Hard rules for this repository: never run openaudible-autoupdate.sh, sudo or a package install on the host ' +
-    '(it runs `sudo dnf install -y`); test it only with stubs on PATH (tests/) or inside `podman run`/`docker run`. ' +
+    '(it runs `sudo dnf install -y`); test it only with stubs on PATH (tests/) or the tests/e2e container harness. ' +
     'GitHub writes go to Danathar/openaudible-autoupdate (add `--repo Danathar/openaudible-autoupdate`), ' +
     'and git pushes only to `origin`.';
 
@@ -632,7 +633,7 @@ const CONTAINER_ENTER = new Set(['distrobox', 'distrobox-enter', 'distrobox-host
 const CONTAINER_ENGINES = new Set(['podman', 'docker', 'nerdctl']);
 // Words a wrapper (env, timeout, xargs, ...) can hide; we look through the wrapper to them.
 const LOOKTHROUGH = new Set([
-    'gh', 'git', ...SHELLS, 'eval', 'source', 'rpm', 'rpm-ostree', 'bootc', 'systemctl', 'systemd-run',
+    'gh', 'git', ...SHELLS, 'eval', 'source', 'rpm', 'systemctl', 'systemd-run',
     ...PRIVILEGE, ...DNF, ...CONTAINER_ENTER, ...CONTAINER_ENGINES,
 ]);
 
@@ -671,38 +672,25 @@ function checkUpdaterRun(envPath, state, what) {
     if (!state.noStubs && stubsDirOk(envPath)) return null;
     return block(
         `Blocked: ${what} would execute openaudible-autoupdate.sh, which runs \`sudo dnf install -y\` on this machine. ` +
-            'Run it only inside `podman run`/`docker run`, or with PATH=<dir>:$PATH where <dir> is under tests/ ' +
+            'Run it only through the tests/e2e container harness, or with PATH=<dir>:$PATH where <dir> is under tests/ ' +
             `inside this project and holds executable ${STUB_COMMANDS.join(', ')} stubs. ` +
             '`distrobox enter` / `toolbox run` reach the real container and never qualify.'
     );
 }
 
-/** `distrobox enter x -- cmd`, `toolbox run cmd`, `distrobox-host-exec cmd`: analyse cmd as running for real. */
+/** `distrobox enter`, `toolbox run|enter`: the real container, always refused; `distrobox-host-exec cmd`: cmd is analysed as running for real. */
 function checkContainerEnter(cmd, args, state) {
-    let inner = [];
-    const dd = args.indexOf('--');
-    if (cmd === 'distrobox-host-exec') {
-        inner = args.slice(args.findIndex((a) => !a.startsWith('-')) === -1 ? args.length : args.findIndex((a) => !a.startsWith('-')));
-    } else if (cmd === 'toolbox') {
-        if (args.find((a) => !a.startsWith('-')) === 'run') {
-            if (dd !== -1) inner = args.slice(dd + 1);
-            else {
-                let k = args.indexOf('run') + 1;
-                while (k < args.length && args[k].startsWith('-')) k += ['-c', '--container', '-d', '--distro', '-r', '--release'].includes(args[k]) ? 2 : 1;
-                inner = args.slice(k);
-            }
-        }
-    } else if (cmd === 'distrobox-enter' || args[0] === 'enter') {
-        if (dd !== -1) inner = args.slice(dd + 1);
-    } else {
-        return null; // other distrobox subcommands (create, list, ephemeral, ...) do not run our commands
+    const sub = args.find((a) => !a.startsWith('-'));
+    if (cmd === 'distrobox-enter' || (cmd === 'distrobox' && sub === 'enter') || (cmd === 'toolbox' && (sub === 'run' || sub === 'enter'))) {
+        return block(`Blocked: \`${cmd}${sub ? ` ${sub}` : ''}\` enters the developer's real long-lived container (real rpm database, working sudo); use \`podman run\` of tests/e2e instead.`);
     }
+    if (cmd !== 'distrobox-host-exec') return null; // other distrobox/toolbox subcommands (create, list, ephemeral, ...) run nothing of ours
+    const at = args.findIndex((a) => !a.startsWith('-'));
+    const inner = at === -1 ? [] : args.slice(at);
     if (inner.length) {
         const real = Object.assign(Object.create(state), { noStubs: true, exportedPath: undefined });
         return checkSegment(inner, real);
     }
-    const named = args.find(isScriptName);
-    if (named !== undefined) return checkUpdaterRun(undefined, { noStubs: true }, `\`${cmd} ... ${named}\``);
     return null;
 }
 
@@ -728,21 +716,20 @@ function checkDnf(cmd, args) {
 
 function checkRpm(args) {
     const longs = args.filter((a) => a.startsWith('--'));
-    const shorts = args.filter((a) => /^-[a-zA-Z]+$/.test(a)).join('');
+    const shorts = args.filter((a) => /^-[a-zA-Z]+$/.test(a));
     const writesLong = ['--install', '--upgrade', '--freshen', '--erase', '--reinstall', '--import', '--rebuilddb'];
-    const query = /[qVK]/.test(shorts) || longs.some((l) => ['--query', '--verify', '--checksig'].includes(l));
-    if (longs.some((l) => writesLong.includes(l)) || (!query && /[iUFe]/.test(shorts))) {
+    const queryLong = longs.some((l) => ['--query', '--verify', '--checksig'].includes(l));
+    // -U/-F/-e change packages wherever they appear, even next to -q; -i is
+    // "info" only when a query/verify/checksig flag is also present
+    // (`rpm -qi`, `rpm -q -i`).
+    const queryMode = queryLong || shorts.some((s) => /[qVK]/.test(s));
+    const writes = shorts.some((s) => /[UFe]/.test(s) || (/i/.test(s) && !queryMode));
+    if (longs.some((l) => writesLong.includes(l)) || writes) {
         return block('Blocked: `rpm` install/upgrade/erase modes change packages on this machine; query (-q), verify (-V) and checksig (-K) are fine.');
     }
     return null;
 }
 
-function checkImageTool(cmd, args) {
-    const { sub } = firstWord(args, []);
-    const readOnly = cmd === 'bootc' ? ['status'] : ['status', 'db', 'search'];
-    if (sub === undefined || readOnly.includes(sub)) return null;
-    return block(`Blocked: \`${cmd} ${sub}\` changes the booted image or layered packages; only ${readOnly.join('/')} are allowed.`);
-}
 
 const SYSTEMCTL_CHANGING = [
     'enable', 'reenable', 'start', 'restart', 'try-restart', 'reload-or-restart', 'try-reload-or-restart',
@@ -856,7 +843,6 @@ function checkSegment(words, state) {
     if (cmd === 'eval') return checkCommand(args.join(' '), nested());
     if (DNF.has(cmd)) return checkDnf(cmd, args);
     if (cmd === 'rpm') return checkRpm(args);
-    if (cmd === 'rpm-ostree' || cmd === 'bootc') return checkImageTool(cmd, args);
     if (cmd === 'systemctl') return checkSystemctl(args);
     if (cmd === 'systemd-run') {
         const target = args.find((a) => isScriptName(a) || a.includes(SCRIPT));
@@ -864,11 +850,17 @@ function checkSegment(words, state) {
     }
     if (CONTAINER_ENTER.has(cmd)) return checkContainerEnter(cmd, args, state);
     if (CONTAINER_ENGINES.has(cmd)) {
+        const sub = args.find((a) => !a.startsWith('-'));
         // `exec`/`attach` reach long-lived containers, including the distrobox
         // container (distrobox containers are podman containers).
-        const sub = args.find((a) => !a.startsWith('-'));
         if (sub === 'exec' || sub === 'attach') {
             return block(`Blocked: \`${cmd} ${sub}\` enters an existing container, possibly the real distrobox one; use \`${cmd} run\` with a throwaway container.`);
+        }
+        // A container run that mentions the updater is exempt only when it is
+        // the e2e harness (a path containing tests/e2e).
+        const named = args.find((a) => a.includes(SCRIPT));
+        if (named !== undefined && !args.some((a) => /(^|\/)tests\/e2e(\/|$)/.test(a))) {
+            return block(`Blocked: \`${cmd}\` with ${named} is not the tests/e2e harness; container runs of the updater are only allowed via tests/e2e.`);
         }
         return null;
     }
