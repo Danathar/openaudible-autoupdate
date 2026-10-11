@@ -39,6 +39,9 @@
 //     `-c` keys such as diff.external, core.pager, alias.*; GIT_* / PAGER /
 //     EDITOR variables (inline or exported) other than identity and no-op
 //     pagers (GIT_EXTERNAL_DIFF=, GIT_TRACE=FILE, GIT_DIR=, ...).
+//   - git, node or a shell run through xargs: xargs appends words read at run
+//     time (`printf '%s\n' --output=FILE | xargs git log`), so none of the
+//     argument checks here could see them.
 //   - `bash -n` (pre-approved syntax check) with a word beginning with +
 //     (`+n`, `+o noexec` turn -n off and run the script) or one bash could
 //     expand into such a word ({, }, *, ?, [, $, backtick).
@@ -1087,6 +1090,9 @@ function checkSegment(words, state) {
     const { pipedFrom, stdinFrom, hereString, heredocBody } = words;
     let w = words.slice();
     const inlineEnv = {};
+    // Set once the segment runs through xargs: xargs appends words it reads at
+    // run time, so no argument check below sees the real command line.
+    let xargsFed = false;
     for (;;) {
         while (w.length && (isAssignment(w[0]) || KEYWORDS.has(w[0]))) {
             if (isAssignment(w[0])) {
@@ -1139,11 +1145,21 @@ function checkSegment(words, state) {
             }
         }
         if (idx === -1) return null;
+        if (cmd === 'xargs') xargsFed = true;
         w = w.slice(idx);
     }
 
     const cmd = basename(w[0]);
     const args = w.slice(1);
+    // `printf '%s\n' --output=FILE | xargs git log` and
+    // `printf '%s\n' +n -c CMD | xargs bash -n` reach git and bash with
+    // options this hook never sees, under the git log and bash -n allow rules.
+    if (xargsFed && (cmd === 'git' || cmd === 'node' || cmd === 'nodejs' || SHELLS.has(cmd))) {
+        return block(
+            `Blocked: \`xargs ${cmd}\`; xargs adds arguments read at run time, so this hook cannot check the ` +
+                `${cmd} command line the allow rules pre-approve. Write the ${cmd} command out in full instead.`
+        );
+    }
     const envPath = inlineEnv.PATH ?? state.exportedPath;
     // Nested analysis (`bash -c '...'`, `eval`) sees this segment's PATH, but
     // anything it exports stays inside it, as in a real subshell.
