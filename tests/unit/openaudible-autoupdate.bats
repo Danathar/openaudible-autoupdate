@@ -231,6 +231,14 @@ assert_rejected_before_download() {
   [[ "$output" == *"up to date"* ]]
 }
 
+@test "up to date still exits 0 when systemd-cat fails" {
+  export STUB_JOURNAL_FAIL=1
+  publish_release 1.0.0
+  run_script
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"up to date"* ]]
+}
+
 @test "up to date writes the message to the journal when systemd-cat exists" {
   publish_release 1.0.0
   run_script
@@ -284,6 +292,23 @@ assert_rejected_before_download() {
   publish_release 2.0.0
   run_script
   [ "$status" -eq 0 ]
+  [[ "$output" == *"OpenAudible upgraded: 1.0.0 -> 2.0.0."* ]]
+}
+
+@test "update succeeds with exit 0 when notify-send fails" {
+  export STUB_NOTIFY_FAIL=1
+  publish_release 2.0.0
+  run_script
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OpenAudible upgraded: 1.0.0 -> 2.0.0."* ]]
+}
+
+@test "update completes the upgrade when systemd-cat fails" {
+  export STUB_JOURNAL_FAIL=1
+  publish_release 2.0.0
+  run_script
+  [ "$status" -eq 0 ]
+  [[ "$(calls)" == *"dnf install -y "* ]]
   [[ "$output" == *"OpenAudible upgraded: 1.0.0 -> 2.0.0."* ]]
 }
 

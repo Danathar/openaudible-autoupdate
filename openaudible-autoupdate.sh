@@ -18,7 +18,8 @@ trap 'rm -rf "$WORKDIR"' EXIT
 log() {
   echo "[$LOG_TAG] $*"
   if command -v systemd-cat >/dev/null 2>&1; then
-    echo "$*" | systemd-cat -t "$LOG_TAG"
+    # Best-effort: a broken journal must not stop the update.
+    echo "$*" | systemd-cat -t "$LOG_TAG" || true
   fi
 }
 
@@ -121,5 +122,8 @@ fi
 
 log "$PKG_NAME upgraded: $installed_version -> $latest_version."
 if command -v notify-send >/dev/null 2>&1; then
-  notify-send "$PKG_NAME updated" "Now on version $latest_version"
+  # Best-effort: a missing desktop session must not fail a finished upgrade.
+  notify-send "$PKG_NAME updated" "Now on version $latest_version" || true
 fi
+
+exit 0
