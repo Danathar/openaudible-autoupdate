@@ -65,7 +65,7 @@ file's own header is the source of truth. Run the command for today's answer.
 
 The fields the script depends on are `.version`, `.download_dir` and
 `.platforms[$PLATFORM_KEY].file` and `.sha256`
-(`openaudible-autoupdate.sh:40-43`). The contract check exists because
+(the `jq` reads after the manifest is fetched in `openaudible-autoupdate.sh`). The contract check exists because
 OpenAudible controls that file, not this repository.
 
 None of these is a velocity target. Throughput and coverage percentage are not

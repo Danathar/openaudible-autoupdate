@@ -4,7 +4,7 @@ For the owner. It says how to notice each automated signal in this repository,
 what to check first, and what to do, and how to stop each automation.
 
 **The safety rule comes first.** `openaudible-autoupdate.sh` runs
-`sudo dnf install -y` (`openaudible-autoupdate.sh:70`). Nothing in this runbook,
+`sudo dnf install -y` on the rpm it downloads. Nothing in this runbook,
 and no agent, runs it for real to "see what happens". Reproduce with stub
 `curl`, `rpm`, `sudo` and `dnf` on `PATH`, or in a throwaway container. Every
 `gh` command here passes `--repo Danathar/openaudible-autoupdate`.
@@ -127,7 +127,7 @@ gh run view "$RUN" --repo Danathar/openaudible-autoupdate --log-failed
 Signal: the `Upstream manifest contract` job of `Nightly compliance` fails (the tracking issue says so), or a user reports the script failing. The script
 depends on `.version`, `.download_dir` and `.platforms[$PLATFORM_KEY].file` /
 `.sha256` of `https://openaudible.org/downloads/swt_version.json`
-(`openaudible-autoupdate.sh:40-43`). OpenAudible, not this repository, controls
+(the `jq` reads after the manifest is fetched). OpenAudible, not this repository, controls
 that file.
 
 ```bash
@@ -139,19 +139,20 @@ Read the result against what the script expects:
 
 1. **A key is missing or renamed.** If `.platforms.linux_x86_64_rpm` is gone, the
    script logs `Platform key '...' not found in version manifest.` and exits 1
-   (`openaudible-autoupdate.sh:45-48`), so it fails safely: no install happens.
+   (the `if [ -z "$file_name" ]` check), so it fails safely: no install happens.
    Find the new key name and either change the default of `PLATFORM_KEY`
-   (`openaudible-autoupdate.sh:13`) and the README configuration table in one
+   (the `: "${PLATFORM_KEY:=...}"` line at the top of the script) and the README configuration table in one
    pull request, or tell affected users to set `PLATFORM_KEY` in the service.
 2. **`.version`, `.download_dir` or `.sha256` changed shape or went missing.**
-   The script reads these with `jq -r`, which prints `null` for a missing field.
-   Only the platform file name is checked for `null`; a missing `.version` or
-   `.sha256` must be caught by the contract check and by new unit tests before
-   merging a fix. Add a stubbed-manifest test for the new shape first, then fix
+   The script reads each field as a string only (a missing field or a
+   non-string reads as empty) and checks its shape before anything is
+   downloaded, so a changed field fails safely: the run logs
+   `Invalid version manifest: ...` and exits 1. To accept a new shape, add a
+   stubbed-manifest unit test for it first, then change the matching check in
    the script.
 3. **The manifest URL moved.** `curl -fsSL` fails and the script exits 1 with
    `Failed to fetch version manifest`. Update the default of `VERSION_URL`
-   (`openaudible-autoupdate.sh:11`) and the README table; users can meanwhile
+   (the `: "${VERSION_URL:=...}"` line at the top of the script) and the README table; users can meanwhile
    set `VERSION_URL` in the service.
 4. **Until the fix merges,** consider telling users to disable the timer (see
    [below](#a-bad-update-reached-users)) if a changed shape could make the script
@@ -179,7 +180,7 @@ the `dnf` commands below run inside the container.
 
 **Roll OpenAudible back.** The script keeps no copy of the rpm: it downloads into
 a temporary directory that is removed when it exits
-(`openaudible-autoupdate.sh:15-16`). Roll back from dnf's record or from the
+(the `WORKDIR` and `trap` lines at the top of the script). Roll back from dnf's record or from the
 vendor's release (the local-file `dnf install` below was tried with dummy rpms, see
 the note after it; `dnf history undo` was not):
 
@@ -208,8 +209,11 @@ leave the timer off, and re-enable it when a good release is out.
 **Fix the cause in this repository** if the script caused it:
 
 - The script installs whenever the manifest version differs from the installed
-  version (`openaudible-autoupdate.sh:50`), not only when it is higher. If the
-  vendor republishes an older version number, it will install that. A fix is a
+  version (the `[ "$latest_version" = "$installed_version" ]` test), not only
+  when it is higher. If the vendor republishes an older version number, it will
+  install that, and Fedora's dnf does downgrade a local rpm (`E2E (fedora
+  container)` case 3b printed `installed after run: 1.0.0` in CI run
+  38046391883). A fix is a
   comparison change plus a test with stubbed versions.
 - Revert the offending merge by pull request, say in the PR what users must do
   (copy the script again to `~/bin`, per the README), and add a test that fails
