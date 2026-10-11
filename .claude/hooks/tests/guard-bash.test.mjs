@@ -183,6 +183,7 @@ const allowed = [
     'bash -n tests/e2e/in-container.sh tests/unit/helpers.bash',
     'bash -n -- openaudible-autoupdate.sh',
     'bats tests/',
+    "git ls-files '*.sh' | xargs shellcheck",
     'cat openaudible-autoupdate.sh',
     'git diff -- openaudible-autoupdate.sh',
     'grep -n "dnf install" openaudible-autoupdate.sh',
@@ -568,6 +569,13 @@ const blocked = [
     ["bash -n {+,+}n -c 'id'", '{+,+}n'],
     ["bash -n ?n -c 'id'", '?n'],
     ['sh -n +n tests/e2e/run.sh', '+n'],
+    // --- xargs appends run-time words no argument check sees ---
+    ["printf '%s\\n' --output=/home/u/.bashrc | xargs git log -1 --format=format:x", 'xargs git'],
+    ["printf '%s\\n' /dev/null /home/u/.ssh/id_ed25519 | xargs git diff", 'xargs git'],
+    ['xargs -a args.txt git show', 'xargs git'],
+    ["printf '%s\\n' +n -c id | xargs bash -n", 'xargs bash'],
+    ["echo --import=data:text/javascript,0 | xargs -n9 node --test", 'xargs node'],
+    ['find . -name x | xargs -I{} timeout 5 git diff {}', 'xargs git'],
 ];
 
 for (const command of allowed) {
