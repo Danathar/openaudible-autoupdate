@@ -153,10 +153,13 @@ assert_rejected_before_download() {
   assert_rejected_before_download "Invalid version manifest: sha256 '' is not"
 }
 
-@test "manifest with a malformed sha256 refuses to install (short, uppercase, non-hex, number)" {
+@test "manifest with a malformed sha256 refuses to install (short, uppercase, non-hex, number, 63/65 hex)" {
   local bad
+  # 63 and 65 hex characters pin both ends of the 64-character pattern: an
+  # unanchored or loosened length would let them through to the download.
   for bad in '"abc123"' '"ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789"' \
-    '"zz00000000000000000000000000000000000000000000000000000000000000"' '12345'; do
+    '"zz00000000000000000000000000000000000000000000000000000000000000"' '12345' \
+    "\"$(printf 'a%.0s' {1..63})\"" "\"$(printf 'a%.0s' {1..65})\""; do
     publish_release 2.0.0
     : >"$CALLS"
     set_manifest_field ".platforms.linux_x86_64_rpm.sha256 = $bad"
@@ -185,7 +188,10 @@ assert_rejected_before_download() {
 
 @test "manifest file that is not a plain .rpm name refuses to download" {
   local bad
-  for bad in '../x.rpm' 'sub/x.rpm' '.hidden.rpm' 'OpenAudible-2.0.0.sh' 'x.rpm.sh' 'x .rpm'; do
+  # 'OpenAudible-2.0.0xrpm' has no dot before rpm, so it only fails if the
+  # pattern's dot is a literal dot rather than "any character".
+  for bad in '../x.rpm' 'sub/x.rpm' '.hidden.rpm' 'OpenAudible-2.0.0.sh' 'x.rpm.sh' 'x .rpm' \
+    'OpenAudible-2.0.0xrpm'; do
     publish_release 2.0.0
     : >"$CALLS"
     set_manifest_field ".platforms.linux_x86_64_rpm.file = \"$bad\""
@@ -196,7 +202,11 @@ assert_rejected_before_download() {
 
 @test "manifest download_dir that is not https refuses to download" {
   local bad
-  for bad in 'http://stub.test/dl/' 'ftp://stub.test/dl/' 'file:///etc/' 'https://' 'stub.test/dl/' 'HTTPS://stub.test/dl/'; do
+  # The last five pin the rest of the pattern: a non-empty host with no '/'
+  # in it, a '/' after the host (so the file name cannot run into the host),
+  # no whitespace in the path, and nothing before "https://".
+  for bad in 'http://stub.test/dl/' 'ftp://stub.test/dl/' 'file:///etc/' 'https://' 'stub.test/dl/' 'HTTPS://stub.test/dl/' \
+    'https:///dl/' 'https://stub.test' 'https://stub.test/d l/' 'xhttps://stub.test/dl/' ' https://stub.test/dl/'; do
     publish_release 2.0.0
     : >"$CALLS"
     set_manifest_field ".download_dir = \"$bad\""
