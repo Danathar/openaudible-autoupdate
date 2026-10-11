@@ -14,8 +14,8 @@ clone or worktree.
 
 ## Rule 1: never run the updater for real
 
-`openaudible-autoupdate.sh` ends in `sudo dnf install -y` on a downloaded rpm
-(`openaudible-autoupdate.sh:70`). An agent must not run it on the owner's host.
+`openaudible-autoupdate.sh` ends in `sudo dnf install -y` on a downloaded rpm.
+An agent must not run it on the owner's host.
 Run it only with stub `curl`, `rpm`, `sudo` and `dnf` first on `PATH`, or inside
 a throwaway container. This is the one rule no task is allowed to override.
 
