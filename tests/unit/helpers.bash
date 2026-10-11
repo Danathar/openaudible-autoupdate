@@ -33,7 +33,7 @@ setup_sandbox() {
   stub_all_tools
 
   export STUB_CALLS="$CALLS" STUB_SERVER="$SERVER" STUB_STATE="$SANDBOX" TMPDIR="$SCRIPT_TMP"
-  export STUB_RPM_VERSION="1.0.0" STUB_DNF_EXIT=0
+  export STUB_RPM_VERSION="1.0.0" STUB_DNF_EXIT=0 STUB_NOTIFY_FAIL=0 STUB_JOURNAL_FAIL=0
   unset VERSION_URL PKG_NAME PLATFORM_KEY
 }
 
@@ -117,10 +117,16 @@ S
   cat >"$SANDBOX/stub-notify-send" <<'S'
 #!/usr/bin/env bash
 echo "notify-send $*" >>"$STUB_CALLS"
+# STUB_NOTIFY_FAIL=1 simulates no desktop session to show the pop-up on.
+[ "${STUB_NOTIFY_FAIL:-0}" = 1 ] && exit 1
+exit 0
 S
   cat >"$SANDBOX/stub-systemd-cat" <<'S'
 #!/usr/bin/env bash
 echo "systemd-cat $* :: $(cat)" >>"$STUB_CALLS"
+# STUB_JOURNAL_FAIL=1 simulates a journal that cannot be written to.
+[ "${STUB_JOURNAL_FAIL:-0}" = 1 ] && exit 1
+exit 0
 S
   chmod +x "$SANDBOX"/stub-*
 }
