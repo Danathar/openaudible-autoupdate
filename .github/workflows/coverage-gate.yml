@@ -28,7 +28,7 @@ jobs:
         run: dnf install -y -q kcov bats jq gawk git nodejs
 
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Measure coverage with kcov
         # Writes coverage/bats/coverage.json (see .coverage-thresholds.json).
