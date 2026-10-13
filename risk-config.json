@@ -14,6 +14,7 @@
                 "policies/**",
                 "scripts/check-policies.mjs",
                 "risk-config.json",
+                "renovate.json",
                 "LICENSE",
                 "AGENTS.md"
             ],

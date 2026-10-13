@@ -20,7 +20,7 @@ directory level.
 
 | Tier | Name | Covers | Required commands | Review |
 | ---- | ---- | ------ | ----------------- | ------ |
-| 1 | critical | `.github/workflows/**`, `.github/CODEOWNERS`, `.github/rulesets/**`, `.claude/settings.json`, `.claude/hooks/**`, `policies/**`, `scripts/check-policies.mjs`, `risk-config.json`, `LICENSE`, `AGENTS.md` | `shellcheck openaudible-autoupdate.sh`, `bats tests/unit`, `tests/e2e/run.sh`, `node scripts/check-policies.mjs`, `node --test scripts/tests/*.test.mjs` | `owner` |
+| 1 | critical | `.github/workflows/**`, `.github/CODEOWNERS`, `.github/rulesets/**`, `.claude/settings.json`, `.claude/hooks/**`, `policies/**`, `scripts/check-policies.mjs`, `risk-config.json`, `renovate.json`, `LICENSE`, `AGENTS.md` | `shellcheck openaudible-autoupdate.sh`, `bats tests/unit`, `tests/e2e/run.sh`, `node scripts/check-policies.mjs`, `node --test scripts/tests/*.test.mjs` | `owner` |
 | 2 | high | `openaudible-autoupdate.sh`, `systemd/**`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/**`, `.github/prompts/**`, `.claude/skills/**`, `.claude/memory/**`, `docs/risk-tiers.md`, `docs/agent-boundaries.md`, `docs/security/**` | `shellcheck openaudible-autoupdate.sh`, `bats tests/unit`, `node scripts/check-policies.mjs` | `owner` |
 | 3 | medium | `tests/**`, `scripts/**`, `.shellcheckrc`, `.coverage-thresholds.json` | `bats tests/unit`, `node --test scripts/tests/*.test.mjs` | `ci` |
 | 4 | low | `docs/**`, `*.md`, `.editorconfig`, `.gitignore` | none | `ci` |
@@ -93,6 +93,11 @@ path table assigns to each path. It does not apply the install-path rule.
 - **`policies/**`, `scripts/check-policies.mjs`, `risk-config.json`, `AGENTS.md`.**
   The rules that bound agents and the checker that enforces them. They are
   changed by the owner, never by the agent they constrain.
+- **`renovate.json`.** Decides which dependency updates Renovate proposes and
+  which of them wait for the owner. Its rule for `.github/workflows/**` keeps
+  Tier 1 workflow updates behind owner approval on the Dependency Dashboard,
+  because the merge lane merges any green PR. Loosening it lets workflow
+  changes reach `main` unreviewed.
 - **`LICENSE`.** GPL-3.0-only text; changing it changes what users may do with
   the script.
 - **`openaudible-autoupdate.sh`, `systemd/**`.** The code that runs as the user
