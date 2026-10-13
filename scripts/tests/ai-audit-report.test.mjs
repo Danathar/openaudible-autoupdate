@@ -1,5 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 import {
     auditPr,
@@ -241,4 +245,94 @@ test('exit code 2 for bad input, bad flags and truncated lists', () => {
         assert.throws(() => parseArgs(['--since', bad]), /real date/);
     }
     assert.equal(parseArgs(['--since', '2028-02-29']).since, '2028-02-29');
+});
+
+test('--limit accepts only a whole number of at least 1', () => {
+    for (const bad of ['0', '-1', '1.5', 'abc', '']) {
+        assert.throws(() => parseArgs(['--limit', bad]), /positive integer/, `--limit ${bad}`);
+    }
+    assert.equal(parseArgs(['--limit', '1']).limit, 1);
+});
+
+test('--limit refuses a list that reached it and allows one below it', () => {
+    assert.equal(run(['--limit', '2', '--output', 'x.md'], [pr(), pr({ number: 2 })]).code, 2);
+    assert.equal(run(['--limit', '3', '--output', 'x.md'], [pr(), pr({ number: 2 })]).code, 0);
+});
+
+test('a flag given last with no value is refused, not read as unset', () => {
+    for (const flag of ['--input', '--since', '--limit', '--output']) {
+        assert.throws(() => parseArgs([flag]), new RegExp(`${flag} needs a value`));
+    }
+    assert.equal(run(['--output'], [pr()]).code, 2);
+});
+
+test('main reads the --input file and writes the --output file it was given', () => {
+    let readPath = null;
+    let writtenPath = null;
+    const code = main(
+        ['--input', 'merged.json', '--output', 'audit-out.md'],
+        (path) => {
+            readPath = path;
+            return JSON.stringify([pr()]);
+        },
+        (path) => {
+            writtenPath = path;
+        }
+    );
+    assert.equal(code, 0);
+    assert.equal(readPath, 'merged.json');
+    assert.equal(writtenPath, 'audit-out.md');
+    let stdinRead = null;
+    main(['--output', 'x.md'], (path) => {
+        stdinRead = path;
+        return '[]';
+    }, () => {});
+    assert.equal(stdinRead, 0);
+});
+
+// agent-audit.yml fails the run on the script's exit status, so these run the
+// script as that workflow does, as a child process with real files.
+const auditDir = () => mkdtempSync(join(tmpdir(), 'oaa-audit-'));
+const audit = (args, cwd) =>
+    spawnSync(process.execPath, [new URL('../ai-audit-report.mjs', import.meta.url).pathname, ...args], {
+        encoding: 'utf8',
+        cwd,
+    });
+const workflowArgs = ['--input', 'merged.json', '--since', '2026-10-01', '--limit', '500', '--strict', '--output', 'report.md'];
+
+test('CLI: the workflow invocation exits 0 and writes the report when every agent PR is clean', () => {
+    const dir = auditDir();
+    writeFileSync(join(dir, 'merged.json'), JSON.stringify([pr()]));
+    const r = audit(workflowArgs, dir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, '');
+    assert.match(readFileSync(join(dir, 'report.md'), 'utf8'), /^### Agent audit trail: merged since 2026-10-01$/m);
+});
+
+test('CLI: the workflow invocation exits 1 on a violation and still writes the report', () => {
+    const dir = auditDir();
+    writeFileSync(join(dir, 'merged.json'), JSON.stringify([pr({ body: 'no signature', closingIssuesReferences: [] })]));
+    const r = audit(workflowArgs, dir);
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(readFileSync(join(dir, 'report.md'), 'utf8'), /violates: linked-issue, signature/);
+});
+
+test('CLI: exits 2 with a message on stderr for unreadable or truncated input', () => {
+    const dir = auditDir();
+    const missing = audit(workflowArgs, dir);
+    assert.equal(missing.status, 2);
+    assert.match(missing.stderr, /^ai-audit-report: /);
+    writeFileSync(join(dir, 'merged.json'), JSON.stringify([pr(), pr({ number: 2 })]));
+    const truncated = audit(['--input', 'merged.json', '--limit', '2', '--output', 'report.md'], dir);
+    assert.equal(truncated.status, 2);
+    assert.match(truncated.stderr, /reached the --limit of 2/);
+});
+
+test('CLI: without --output the report goes to stdout', () => {
+    const dir = auditDir();
+    writeFileSync(join(dir, 'merged.json'), JSON.stringify([pr()]));
+    const r = audit(['--input', 'merged.json'], dir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^### Agent audit trail/);
+    assert.ok(r.stdout.endsWith('\n'));
 });
