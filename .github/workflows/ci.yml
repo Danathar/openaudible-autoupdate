@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Install pinned shellcheck
         # The runner image's shellcheck version drifts; pin a release so lint
@@ -71,7 +71,7 @@ jobs:
         run: dnf install -y -q bats jq gawk git
 
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Run bats unit tests
         run: |
@@ -88,7 +88,7 @@ jobs:
         run: dnf install -y -q git
 
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Run end-to-end test
         # Builds two dummy rpms, serves them locally, runs the real script and

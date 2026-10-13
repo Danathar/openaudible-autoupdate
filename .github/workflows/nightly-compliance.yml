@@ -42,7 +42,7 @@ jobs:
         run: dnf install -y -q bats jq gawk git
 
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Run bats unit tests
         run: bats --tap tests/unit
@@ -53,7 +53,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: shellcheck (script, tests, e2e)
         run: |
@@ -70,7 +70,7 @@ jobs:
         run: dnf install -y -q git
 
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Run end-to-end test
         env:
@@ -83,7 +83,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Fetch the manifest and check the fields the script reads
         run: |
