@@ -49,6 +49,8 @@ function run(command, toolName = 'Bash') {
 }
 
 const allowed = [
+    // a backslash-quoted heredoc delimiter keeps its body literal
+    'cat <<\\EOF\n$(sudo ls)\nEOF',
     // --- node --test and read-only git: the forms .claude/settings.json pre-approves ---
     'node --test scripts/tests/',
     'node --test .claude/hooks/tests/',
@@ -338,6 +340,15 @@ const blocked = [
     ['env -S "GH_PROMPT_DISABLED=1" gh pr create --repo someone/other --base main --head x', 'someone/other'],
     ['env FOO=1 gh issue create --repo someone/other --title -Sx', 'someone/other'],
     ['env sudo -S git push upstream main', 'privilege'],
+    // a backslash-quoted heredoc delimiter ends the body like a quoted one
+    ['cat <<\\EOF\nx\nEOF\nsudo ls', 'privilege'],
+    ['cat <<E\\OF\nx\nEOF\nsudo ls', 'privilege'],
+    ['cat <<-\\EOF\n\tx\n\tEOF\nsudo ls', 'privilege'],
+    ['cat <<\\EOF\nx\nEOF\n./openaudible-autoupdate.sh', 'would execute'],
+    // with no command, distrobox-host-exec runs the host shell on its stdin
+    ['distrobox-host-exec', 'no command'],
+    ["echo 'sudo ls' | distrobox-host-exec", 'no command'],
+    ['distrobox-host-exec <<EOF\nsudo ls\nEOF', 'no command'],
     ['gh pr create --repo Danathar/openaudible-autoupdate --base main --head b -Bdevelop', '--base main'],
     ['gh pr create --repo Danathar/openaudible-autoupdate --base main --head b -H', '--head'],
     ['git config remote.origin.url https://github.com/someone/other.git && git push origin main', 'could redirect'],
