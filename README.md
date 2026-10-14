@@ -47,7 +47,7 @@ exits cleanly and does nothing.
   only keeps an existing rpm install up to date, it does not install
   OpenAudible itself
 - `bash`
-- `curl`, `jq`, `rpm`, `dnf`, `sha256sum`
+- `curl`, `jq`, `rpm`, `dnf`, `sha256sum`, `awk`
 - passwordless (or otherwise non-interactive) `sudo` for `dnf install`,
   since the timer runs unattended
 
