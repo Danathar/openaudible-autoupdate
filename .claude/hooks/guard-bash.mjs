@@ -76,6 +76,9 @@
 //     runs a -F formatter path) to collect tests, so the file's top-level code
 //     runs. `bats openaudible-autoupdate.sh` therefore needs the same stubs on
 //     PATH as running the script directly; `bats tests/unit` is unaffected.
+//     A word the shell could expand into the updater's path counts as naming
+//     it: a pattern matching its name (`openaudible-*.sh`), a `{...}` brace
+//     expansion, or a `$X` / `$(...)` in the file name.
 //   - sudo / doas / pkexec / run0 / su in any position of a wrapper chain,
 //     including behind systemd-run and flatpak-spawn.
 //   - dnf/dnf5/yum/microdnf subcommands other than read-only queries (list,
@@ -902,7 +905,7 @@ const LOOKTHROUGH = new Set([
 
 /** True if a tokenized segment names the updater as an argument or reads it with `<`. */
 function segmentReadsUpdater(seg) {
-    return seg.some(isScriptName) || (seg.stdinFrom !== undefined && isScriptName(seg.stdinFrom));
+    return seg.some(mayNameScript) || (seg.stdinFrom !== undefined && mayNameScript(seg.stdinFrom));
 }
 
 /** True if a command line (a substitution body) reads or names the updater. */
@@ -918,14 +921,76 @@ function readsUpdater(commandLine) {
 function batsUpdaterArg(args) {
     return args.find((a) => {
         const eq = a.indexOf('=');
-        return isScriptName(a) || (a.startsWith('--') && eq !== -1 && isScriptName(a.slice(eq + 1))) ||
-            (/^-[^-]/.test(a) && isScriptName(a.slice(2)));
+        return mayNameScript(a) || (a.startsWith('--') && eq !== -1 && mayNameScript(a.slice(eq + 1))) ||
+            (/^-[^-]/.test(a) && mayNameScript(a.slice(2)));
     });
 }
 
 /** True for `openaudible-autoupdate.sh` / `openaudible-autoupdate` in any path form. */
 function isScriptName(word) {
     return basename(String(word)).replace(/\.sh$/, '') === SCRIPT;
+}
+
+/**
+ * True if the shell could turn this word into the updater's path: it names
+ * the updater, or its file name (the part after the last `/`) is a pattern
+ * that matches the updater's name (`openaudible-*.sh`, `openaudible-autoupdat?`,
+ * `openaudible-autoupdate.s[h]`), or holds an expansion whose value we cannot
+ * see (`$X`, `$(...)`). Brace expansion can build any name, so any `{...}`
+ * counts. The tokenizer has already dropped quotes, so a quoted `*` counts too.
+ */
+function mayNameScript(word) {
+    const w = String(word);
+    if (isScriptName(w)) return true;
+    if (/[{}]/.test(w)) return true;
+    const name = w.slice(w.lastIndexOf('/') + 1);
+    if (name.includes('$')) return true;
+    if (!/[*?[]/.test(name)) return false;
+    const re = new RegExp(`^${globToRegExp(name)}$`, 's');
+    return re.test(`${SCRIPT}.sh`) || re.test(SCRIPT);
+}
+
+/**
+ * A pathname pattern as a regular expression that matches at least every
+ * name the shell would match: `*` and `?` as in the shell, and a bracket
+ * expression (with `[:class:]` parts and a leading `]` handled) as any one
+ * character. An unclosed `[` is a literal, as in the shell.
+ */
+function globToRegExp(pattern) {
+    let re = '';
+    for (let i = 0; i < pattern.length; i++) {
+        const c = pattern[i];
+        if (c === '*') {
+            re += '.*';
+        } else if (c === '?') {
+            re += '.';
+        } else if (c === '[' && bracketEnd(pattern, i) !== -1) {
+            re += '.';
+            i = bracketEnd(pattern, i);
+        } else {
+            re += c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+    }
+    return re;
+}
+
+/** Index of the `]` closing the bracket expression opened at `start`, or -1. */
+function bracketEnd(pattern, start) {
+    let j = start + 1;
+    if (pattern[j] === '!' || pattern[j] === '^') j++;
+    if (pattern[j] === ']') j++;
+    while (j < pattern.length) {
+        if (pattern[j] === '[' && ':=.'.includes(pattern[j + 1] ?? 'x')) {
+            const close = pattern.indexOf(`${pattern[j + 1]}]`, j + 2);
+            if (close === -1) return -1;
+            j = close + 2;
+        } else if (pattern[j] === ']') {
+            return j;
+        } else {
+            j++;
+        }
+    }
+    return -1;
 }
 
 const STUB_COMMANDS = ['sudo', 'dnf', 'rpm'];
@@ -1188,9 +1253,9 @@ function checkSegment(words, state) {
     }
     if (cmd === 'git') return checkGit(args, inlineEnv, state.exportedEnv ?? {});
     if (cmd === 'node' || cmd === 'nodejs') return checkNode(cmd, args, { ...(state.exportedEnv ?? {}), ...inlineEnv });
-    if (isScriptName(w[0])) return checkUpdaterRun(envPath, state, `Running ${w[0]}`);
+    if (mayNameScript(w[0])) return checkUpdaterRun(envPath, state, `Running ${w[0]}`);
     if (cmd === 'source' || cmd === '.') {
-        return args.some(isScriptName) ? checkUpdaterRun(envPath, state, `Sourcing ${args.find(isScriptName)}`) : null;
+        return args.some(mayNameScript) ? checkUpdaterRun(envPath, state, `Sourcing ${args.find(mayNameScript)}`) : null;
     }
     // bats sources each file it is given to find its tests, so the file's
     // top-level code runs: `bats openaudible-autoupdate.sh` runs the updater
@@ -1228,7 +1293,7 @@ function checkSegment(words, state) {
         }
         // `bash -n file` only parses the file; any other shell invocation runs it.
         const syntaxOnly = args.some((a) => /^-[a-zA-Z]*n[a-zA-Z]*$/.test(a));
-        const target = args.find(isScriptName);
+        const target = args.find(mayNameScript);
         if (!syntaxOnly && target !== undefined) return checkUpdaterRun(envPath, state, `\`${cmd} ${target}\``);
         // No script operand: the shell reads its program from stdin
         // (`cat openaudible-autoupdate.sh | bash`, `bash -s < openaudible-autoupdate.sh`).
@@ -1241,7 +1306,7 @@ function checkSegment(words, state) {
                 feeders.push(p);
                 if (segmentReadsUpdater(p)) pipeReads = true;
             }
-            const reads = hereReads || (stdinFrom !== undefined && isScriptName(stdinFrom)) || pipeReads;
+            const reads = hereReads || (stdinFrom !== undefined && mayNameScript(stdinFrom)) || pipeReads;
             if (reads) return checkUpdaterRun(envPath, state, `\`${cmd}\` reading ${SCRIPT}.sh on stdin`);
             // A heredoc or here-string fed to a shell is a script it runs.
             // The same holds for text piped in (`cat <<'EOF' | bash`).
