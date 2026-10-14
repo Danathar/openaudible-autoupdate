@@ -71,7 +71,11 @@
 //     containers are podman containers). A `podman|docker run` whose arguments
 //     mention the updater is allowed only when they also contain a
 //     `tests/e2e` path. `sh -n` / `bash -n` (syntax check) and tools that merely
-//     read the file (shellcheck, cat, grep, bats, ...) are fine.
+//     read the file (shellcheck, cat, grep, ...) are fine. bats is not one of
+//     them: it sources every file it is given (and a --setup-suite-file, and
+//     runs a -F formatter path) to collect tests, so the file's top-level code
+//     runs. `bats openaudible-autoupdate.sh` therefore needs the same stubs on
+//     PATH as running the script directly; `bats tests/unit` is unaffected.
 //   - sudo / doas / pkexec / run0 / su in any position of a wrapper chain,
 //     including behind systemd-run and flatpak-spawn.
 //   - dnf/dnf5/yum/microdnf subcommands other than read-only queries (list,
@@ -892,7 +896,7 @@ const CONTAINER_ENTER = new Set(['distrobox', 'distrobox-enter', 'distrobox-host
 const CONTAINER_ENGINES = new Set(['podman', 'docker', 'nerdctl']);
 // Words a wrapper (env, timeout, xargs, ...) can hide; we look through the wrapper to them.
 const LOOKTHROUGH = new Set([
-    'gh', 'git', 'node', 'nodejs', ...SHELLS, 'eval', 'source', 'rpm', 'rpm-ostree', 'bootc', 'pkcon', 'systemctl', 'systemd-run',
+    'gh', 'git', 'node', 'nodejs', ...SHELLS, 'eval', 'source', 'bats', 'rpm', 'rpm-ostree', 'bootc', 'pkcon', 'systemctl', 'systemd-run',
     ...PRIVILEGE, 'flatpak-spawn', ...DNF, ...CONTAINER_ENTER, ...CONTAINER_ENGINES,
 ]);
 
@@ -904,6 +908,19 @@ function segmentReadsUpdater(seg) {
 /** True if a command line (a substitution body) reads or names the updater. */
 function readsUpdater(commandLine) {
     return tokenize(commandLine).some(segmentReadsUpdater);
+}
+
+/**
+ * The updater named in a bats argument, in any spelling bats accepts: an
+ * operand, `--opt=FILE` (--setup-suite-file=, --formatter=, ...) or a short
+ * option with its value attached (`-F./openaudible-autoupdate.sh`).
+ */
+function batsUpdaterArg(args) {
+    return args.find((a) => {
+        const eq = a.indexOf('=');
+        return isScriptName(a) || (a.startsWith('--') && eq !== -1 && isScriptName(a.slice(eq + 1))) ||
+            (/^-[^-]/.test(a) && isScriptName(a.slice(2)));
+    });
 }
 
 /** True for `openaudible-autoupdate.sh` / `openaudible-autoupdate` in any path form. */
@@ -1174,6 +1191,14 @@ function checkSegment(words, state) {
     if (isScriptName(w[0])) return checkUpdaterRun(envPath, state, `Running ${w[0]}`);
     if (cmd === 'source' || cmd === '.') {
         return args.some(isScriptName) ? checkUpdaterRun(envPath, state, `Sourcing ${args.find(isScriptName)}`) : null;
+    }
+    // bats sources each file it is given to find its tests, so the file's
+    // top-level code runs: `bats openaudible-autoupdate.sh` runs the updater
+    // under the pre-approved `bats` rule. Same for --setup-suite-file and a
+    // formatter given by path.
+    if (cmd === 'bats') {
+        const target = batsUpdaterArg(args);
+        return target === undefined ? null : checkUpdaterRun(envPath, state, `\`bats ${target}\``);
     }
     if (SHELLS.has(cmd)) {
         // `bash -n` is pre-approved in .claude/settings.json because -n parses a
