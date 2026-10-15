@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 import {
     checkAll,
     checkRiskTiers,
+    checkTopLevelPermissions,
     classify,
     globToRegExp,
 } from '../check-policies.mjs';
@@ -108,6 +109,13 @@ test('globToRegExp handles **, * and exact names', () => {
     assert.ok(!globToRegExp('AGENTS.md').test('AGENTS.mdx'));
     assert.ok(globToRegExp('a.b').test('a.b'));
     assert.ok(!globToRegExp('a.b').test('axb'));
+});
+
+test('globToRegExp: ? matches exactly one character, never a slash', () => {
+    assert.ok(globToRegExp('file?.md').test('file1.md'));
+    assert.ok(!globToRegExp('file?.md').test('file.md'));
+    assert.ok(!globToRegExp('file?.md').test('file12.md'));
+    assert.ok(!globToRegExp('file?.md').test('file/.md'));
 });
 
 test('real repository trees: classify picks the most dangerous tier', () => {
@@ -212,6 +220,29 @@ test('repo-target: targeting octocat/other-repo for a write fails', () => {
 test('repo-target: markdown outside the scanned dirs is not scanned', () => {
     const v = run({ 'tests/notes.md': 'gh pr create\n' });
     assert.deepEqual(v, []);
+});
+
+test('repo-target: .git, node_modules, dist and coverage dirs are never walked', () => {
+    const skipped = {};
+    for (const d of ['.git', 'node_modules', 'dist', 'coverage']) {
+        skipped[`docs/${d}/pkg/README.md`] = 'gh pr create\n';
+    }
+    assert.deepEqual(run(skipped), []);
+    const v = run({ 'docs/vendor/pkg/README.md': 'gh pr create\n' });
+    assert.equal(v.length, 1);
+    assert.match(v[0], /^docs\/vendor\/pkg\/README\.md:1:/);
+});
+
+test('repo-target: excludeGlobs drops a scanned file', () => {
+    const policy = JSON.parse(FORK);
+    policy.excludeGlobs = ['docs/legacy/**'];
+    const v = run({
+        'policies/repo-target.json': JSON.stringify(policy),
+        'docs/legacy/old.md': 'gh pr create\n',
+        'docs/new.md': 'gh pr create\n',
+    });
+    assert.equal(v.length, 1);
+    assert.match(v[0], /^docs\/new\.md:1:/);
 });
 
 // ---- workflow-permissions
@@ -491,6 +522,30 @@ test('workflows: top-level write permissions are rejected', () => {
     assert.deepEqual(run({ '.github/workflows/a.yml': empty }), []);
 });
 
+test('workflows: a write scope in an inline permissions map is rejected', () => {
+    for (const inline of ['{ contents: write }', '{contents: read, issues: write}']) {
+        const wf = GOOD_WF.replace('permissions:\n  contents: read', `permissions: ${inline}`);
+        const v = run({ '.github/workflows/a.yml': wf });
+        assert.equal(v.length, 1, inline);
+        assert.match(v[0], /a\.yml:4: top-level permissions grant write$/, inline);
+    }
+    const readOnly = GOOD_WF.replace('permissions:\n  contents: read', 'permissions: { contents: read }');
+    assert.deepEqual(run({ '.github/workflows/a.yml': readOnly }), []);
+});
+
+test('workflows: top-level write is forbidden unless the policy sets forbidTopLevelWrite false', () => {
+    const code = ['permissions:', '  issues: write', 'jobs:'];
+    assert.equal(checkTopLevelPermissions('a.yml', code, {}).length, 1);
+    assert.deepEqual(
+        checkTopLevelPermissions('a.yml', code, { forbidTopLevelWrite: false }),
+        [],
+    );
+    assert.match(
+        checkTopLevelPermissions('a.yml', ['permissions: write-all'], { forbidTopLevelWrite: false })[0],
+        /write-all/,
+    );
+});
+
 test('workflows: job-level write permissions are allowed', () => {
     const wf = GOOD_WF.replace('    runs-on', '    permissions:\n      packages: write\n    runs-on');
     assert.deepEqual(run({ '.github/workflows/a.yml': wf }), []);
@@ -573,6 +628,26 @@ test('risk tiers: default_tier must exist and rows need five columns', () => {
     assert.match(v.join('\n'), /malformed tier row/);
 });
 
+test('risk tiers: a missing or empty tiers array is the only violation', () => {
+    const only = ['risk-config.json: "tiers" must be a non-empty array'];
+    assert.deepEqual(checkRiskTiers({ default_tier: 1, tiers: [] }, TABLE), only);
+    assert.deepEqual(checkRiskTiers({ default_tier: 1 }, TABLE), only);
+});
+
+test('risk tiers: duplicate tier numbers are reported', () => {
+    const cfg = structuredClone(RISK_FIXTURE);
+    cfg.tiers.push({ ...cfg.tiers[1], name: 'again' });
+    assert.match(checkRiskTiers(cfg, TABLE).join('\n'), /duplicate tier numbers/);
+});
+
+test('risk tiers: a review cell without backticks, and a two-digit tier, are read', () => {
+    const cfg = structuredClone(RISK_FIXTURE);
+    cfg.tiers[1].tier = 10;
+    cfg.default_tier = 10;
+    const table = TABLE.replace('| `owner` |', '| owner |').replace('| 2 | low |', '| 10 | low |');
+    assert.deepEqual(checkRiskTiers(cfg, table), []);
+});
+
 test('missing policy files are violations', () => {
     const dir = fixture({});
     fs.rmSync(path.join(dir, 'policies'), { recursive: true });
@@ -586,6 +661,28 @@ test('missing policy files are violations', () => {
     } finally {
         fs.rmSync(dir, { recursive: true, force: true });
     }
+});
+
+test('a missing risk-tier doc is a violation, not a skipped check', () => {
+    const dir = fixture({});
+    fs.rmSync(path.join(dir, 'docs/risk-tiers.md'));
+    try {
+        assert.deepEqual(checkAll(dir), ['docs/risk-tiers.md: missing']);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('invalid policy JSON is reported and the other policies still run', () => {
+    const v = run({
+        'policies/workflow-permissions.json': '{ "workflowGlobs": [',
+        'risk-config.json': 'not json',
+        'docs/a.md': 'gh pr create\n',
+    });
+    assert.equal(v.length, 3, v.join('\n'));
+    assert.match(v.join('\n'), /policies\/workflow-permissions\.json: invalid JSON \(/);
+    assert.match(v.join('\n'), /risk-config\.json: invalid JSON \(/);
+    assert.match(v.join('\n'), /docs\/a\.md:1:/);
 });
 
 // ---- CLI
@@ -602,12 +699,13 @@ test('cli: exits 1 with violations and 0 when clean; --classify prints tiers', (
         assert.equal(r2.status, 0, r2.stderr);
         const r3 = spawnSync(
             'node',
-            [script, '--root', good, '--classify', 'LICENSE', 'docs/a.md'],
+            [script, '--root', good, '--classify', 'LICENSE', 'docs/a.md', './docs/b.md'],
             { encoding: 'utf8' },
         );
         assert.equal(r3.status, 0);
         assert.match(r3.stdout, /LICENSE: tier 1 \(critical\), review: owner/);
         assert.match(r3.stdout, /docs\/a\.md: tier 4 \(low\)/);
+        assert.match(r3.stdout, /\.\/docs\/b\.md: tier 4 \(low\)/);
     } finally {
         fs.rmSync(bad, { recursive: true, force: true });
         fs.rmSync(good, { recursive: true, force: true });
