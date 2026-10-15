@@ -20,7 +20,7 @@ Contributions are licensed GPL-3.0-only, like the rest of the repo.
 
 Requirements for development: `bash`, [`shellcheck`](https://www.shellcheck.net/),
 [`bats`](https://github.com/bats-core/bats-core), `jq`, and a container runtime
-(podman or docker) for the end-to-end tests, and Node 22 for
+(podman or docker) for the end-to-end tests, and Node 24 (the version CI runs) for
 `node scripts/check-policies.mjs`.
 
 ## Before you open a PR
