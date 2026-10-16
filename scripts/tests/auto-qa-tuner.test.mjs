@@ -90,3 +90,74 @@ test('CLI end to end: writes report and issue body, never touches the threshold 
     assert.match(readFileSync(join(out, 'issue-body.md'), 'utf8'), /```diff[\s\S]*\+\s+"lines": 94/);
     assert.equal(readFileSync(tj, 'utf8'), before);
 });
+
+test('never lowers a floor even when the buffer is larger than the margin', () => {
+    // headroom 8.4 > 5 would raise, but floor(96.4 - 10) = 86 is below the floor of 88.
+    const wide = { raise_floor_when_headroom_exceeds: 5, buffer_below_measured: 10 };
+    const r = propose(thresholds(), wide, { [AREA]: kcov(96.4) });
+    assert.deepEqual(r.changes, []);
+    assert.deepEqual(r.proposed, thresholds());
+});
+
+test('an area without a summary does not stop the areas after it', () => {
+    const t = thresholds();
+    t.areas = { 'first.sh': { ...t.areas[AREA] }, [AREA]: t.areas[AREA] };
+    const r = propose(t, rules, { 'first.sh': null, [AREA]: kcov(96.4) });
+    assert.deepEqual(r.skipped, ['first.sh: no coverage summary, left unchanged']);
+    assert.deepEqual(r.changes.map((c) => c.area), [AREA]);
+    assert.match(renderReport(r, rules), /\n\nSkipped - first\.sh: no coverage summary, left unchanged\n$/);
+});
+
+test('linesPct rejects a percent_covered with trailing text', () => {
+    assert.equal(linesPct({ percent_covered: '97 lines' }), null);
+});
+
+test('loadSummaries gives null for a summary file that does not exist', () => {
+    const root = mkdtempSync(join(tmpdir(), 'oaa-tuner-'));
+    assert.deepEqual(loadSummaries(thresholds(), root), { [AREA]: null });
+});
+
+test('report states the rule with the configured numbers', () => {
+    const text = renderReport({ changes: [], skipped: [] }, { raise_floor_when_headroom_exceeds: 7, buffer_below_measured: 2 });
+    assert.match(text, /^## Auto-QA coverage tuning\n/);
+    assert.match(text, /exceeds 7 points, to floor\(measured - 2\)\. Floors are never lowered automatically\./);
+});
+
+test('CLI the way auto-qa.yml runs it, nothing to raise: raise=false, empty issue body', () => {
+    // .github/workflows/auto-qa.yml runs `node scripts/auto-qa-tuner.mjs --out-dir auto-qa-out`
+    // from the checkout root, and opens the tracking issue only when raise == 'true'.
+    const root = mkdtempSync(join(tmpdir(), 'oaa-tuner-'));
+    mkdirSync(join(root, '.github'));
+    mkdirSync(join(root, 'coverage/bats'), { recursive: true });
+    writeFileSync(join(root, '.coverage-thresholds.json'), JSON.stringify(thresholds(), null, 4));
+    writeFileSync(join(root, '.github/auto-qa-tuning.json'), JSON.stringify({ coverage: rules }));
+    writeFileSync(join(root, 'coverage/bats/coverage.json'), JSON.stringify(kcov('92')));
+    const outputFile = join(root, 'gh-output');
+    const run = spawnSync(
+        process.execPath,
+        [new URL('../auto-qa-tuner.mjs', import.meta.url).pathname, '--out-dir', 'auto-qa-out'],
+        { cwd: root, encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: outputFile } }
+    );
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(readFileSync(outputFile, 'utf8'), 'raise=false\n');
+    const report = readFileSync(join(root, 'auto-qa-out/report.md'), 'utf8');
+    assert.match(report, /No floor raise warranted/);
+    assert.equal(run.stdout, report);
+    assert.equal(readFileSync(join(root, 'auto-qa-out/issue-body.md'), 'utf8'), '');
+});
+
+test('CLI without GITHUB_OUTPUT writes no step output and still succeeds', () => {
+    const root = mkdtempSync(join(tmpdir(), 'oaa-tuner-'));
+    mkdirSync(join(root, '.github'));
+    writeFileSync(join(root, '.coverage-thresholds.json'), JSON.stringify(thresholds(), null, 4));
+    writeFileSync(join(root, '.github/auto-qa-tuning.json'), JSON.stringify({ coverage: rules }));
+    const env = { ...process.env };
+    delete env.GITHUB_OUTPUT;
+    const run = spawnSync(
+        process.execPath,
+        [new URL('../auto-qa-tuner.mjs', import.meta.url).pathname, '--root', root, '--out-dir', join(root, 'out')],
+        { encoding: 'utf8', env }
+    );
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /Skipped - openaudible-autoupdate\.sh: no coverage summary/);
+});
