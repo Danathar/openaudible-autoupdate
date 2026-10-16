@@ -150,7 +150,7 @@ Read the result against what the script expects:
    `Invalid version manifest: ...` and exits 1. To accept a new shape, add a
    stubbed-manifest unit test for it first, then change the matching check in
    the script.
-3. **The manifest URL moved.** `curl -fsSL` fails and the script exits 1 with
+3. **The manifest URL moved.** `curl -fsSL --proto =https --proto-redir =https` fails and the script exits 1 with
    `Failed to fetch version manifest`. Update the default of `VERSION_URL`
    (the `: "${VERSION_URL:=...}"` line at the top of the script) and the README table; users can meanwhile
    set `VERSION_URL` in the service.

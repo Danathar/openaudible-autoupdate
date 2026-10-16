@@ -15,7 +15,8 @@ script keeps an existing **rpm** install current:
 1. `rpm -q --qf '%{VERSION}' "$PKG_NAME"` gives the installed version
    (not installed via rpm -> log and exit 0).
 2. `curl` fetches the manifest at `VERSION_URL`
-   (`https://openaudible.org/downloads/swt_version.json`); `jq` reads
+   (`https://openaudible.org/downloads/swt_version.json`) with
+   `--proto =https --proto-redir =https`; `jq` reads
    `.version`, `.download_dir`, `.platforms[$PLATFORM_KEY].file` and
    `.platforms[$PLATFORM_KEY].sha256`.
    Before any of these is used the manifest must be a JSON object, and each
