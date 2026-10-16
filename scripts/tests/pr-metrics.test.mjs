@@ -1,11 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
     classifyAuthor,
     computeMetrics,
     formatDuration,
+    formatRate,
     median,
     outcomeOf,
     percentile,
@@ -175,4 +179,140 @@ test('CLI exits non-zero on bad input', () => {
         () => execFileSync(process.execPath, [script], { input: '{"not":"an array"}', stdio: 'pipe' }),
         (err) => err.status === 1 && /must be a JSON array/.test(String(err.stderr)),
     );
+});
+
+test('formatRate shows the rounded rate and merged/decided', () => {
+    assert.equal(formatRate({ acceptanceRate: null, merged: 0, closedUnmerged: 0 }), 'n/a');
+    assert.equal(formatRate({ acceptanceRate: 2 / 3, merged: 2, closedUnmerged: 1 }), '66.7% (2/3)');
+    assert.equal(formatRate({ acceptanceRate: 1, merged: 4, closedUnmerged: 0 }), '100% (4/4)');
+});
+
+test('formatDuration boundaries: 1 hour is hours, 48 hours is days', () => {
+    assert.equal(formatDuration(1), '1 h');
+    assert.equal(formatDuration(47.9), '47.9 h');
+    assert.equal(formatDuration(48), '2 d');
+});
+
+test('a bot flag alone makes an account a bot', () => {
+    assert.equal(classifyAuthor({ login: 'renovate', is_bot: true }), 'other-bot');
+    assert.equal(classifyAuthor({ login: 'Danathar', is_bot: true }), 'other-bot');
+});
+
+test('--owner changes who counts as the owner', () => {
+    const prs = [merged(1, { login: 'someone', is_bot: false }, 2 * DAY, HOUR), merged(2, human, 2 * DAY, HOUR)];
+    const w = computeMetrics(prs, { now: NOW, owner: 'SomeOne' }).windows.all.byAuthorClass;
+    assert.equal(w.owner.merged, 1);
+    assert.equal(w['other-human'].merged, 1);
+    assert.equal(classifyAuthor({ login: 'someone' }, 'someone'), 'owner');
+    assert.equal(classifyAuthor(human, 'someone'), 'other-human');
+});
+
+test('open PRs: created after now are left out, undated or unparseable ones are counted', () => {
+    const open = (number, createdAt) => ({ number, author: human, state: 'OPEN', createdAt, mergedAt: null, closedAt: null });
+    const s = summarize(
+        [open(1, iso(nowMs - DAY)), open(2, iso(nowMs + DAY)), open(3, null), open(4, 'not a date')],
+        { nowMs },
+    );
+    assert.equal(s.open, 3);
+});
+
+test('outcome: CLOSED state or a closedAt each mean closed when there is no mergedAt', () => {
+    assert.equal(outcomeOf({ state: 'CLOSED', mergedAt: null, closedAt: null }), 'closed');
+    assert.equal(outcomeOf({ state: 'OPEN', mergedAt: null, closedAt: iso(nowMs) }), 'closed');
+    assert.equal(outcomeOf({ state: 'OPEN', mergedAt: null, closedAt: null }), 'open');
+    assert.equal(outcomeOf({ state: 'MERGED', mergedAt: iso(nowMs), closedAt: iso(nowMs) }), 'merged');
+});
+
+test('a decided PR with no decision date is not counted in any window', () => {
+    const pr = { number: 1, author: human, state: 'CLOSED', createdAt: iso(nowMs - DAY), mergedAt: null, closedAt: null };
+    const s = computeMetrics([pr], { now: NOW }).windows.all.overall;
+    assert.equal(s.closedUnmerged, 0);
+    assert.equal(s.acceptanceRate, null);
+});
+
+test('merged PRs without a usable creation date count as merged but give no merge time', () => {
+    const noCreated = { ...merged(1, human, 2 * DAY, HOUR), createdAt: null };
+    const badCreated = { ...merged(2, human, 2 * DAY, HOUR), createdAt: 'not a date' };
+    const mergedBeforeCreated = { ...merged(3, human, 2 * DAY, HOUR), mergedAt: iso(nowMs - 3 * DAY) };
+    const s = summarize([noCreated, badCreated, mergedBeforeCreated], { nowMs });
+    assert.equal(s.merged, 3);
+    assert.equal(s.timeToMergeHours.samples, 0);
+    assert.equal(s.timeToMergeHours.median, null);
+});
+
+test('now may be a Date; window start and labels come from it', () => {
+    const now = new Date(nowMs + 123);
+    const m = computeMetrics([], { now });
+    assert.equal(m.generatedAt, now.toISOString());
+    assert.equal(m.windows.all.since, null);
+    assert.equal(m.windows.last30d.since, iso(nowMs + 123 - 30 * DAY));
+    assert.equal(m.windows.last30d.label, 'last 30 days');
+});
+
+test('markdown lists every window and author class with its numbers', () => {
+    const prs = [
+        merged(1, human, 3 * DAY, 2 * HOUR),
+        merged(2, hive, 3 * DAY, 30 * 60_000),
+        { number: 3, author: hive, state: 'CLOSED', createdAt: iso(nowMs - 3 * DAY), mergedAt: null, closedAt: iso(nowMs - DAY) },
+        merged(4, hive, 50 * DAY, 4 * DAY),
+    ];
+    const md = renderMarkdown(computeMetrics(prs, { now: NOW, windowDays: 7 }));
+    assert.match(md, /^Generated 2026-10-09T12:00:00\.000Z from 4 PRs\. /m);
+    assert.match(md, /^## All time$/m);
+    assert.match(md, /^## Last 7 days$/m);
+    assert.match(md, /^\| all \| 3 \| 1 \| 0 \| 75% \(3\/4\) \| 2 h \| 4 d \|$/m);
+    assert.match(md, /^\| Hive app \| 2 \| 1 \| 0 \| 66\.7% \(2\/3\) \| 2 d \| 4 d \|$/m);
+    assert.match(md, /^\| Hive app \| 1 \| 1 \| 0 \| 50% \(1\/2\) \| 30 min \| 30 min \|$/m);
+    assert.match(md, /^\| owner \| 1 \| 0 \| 0 \| 100% \(1\/1\) \| 2 h \| 2 h \|$/m);
+    assert.match(md, /^\| other bots \| 0 \| 0 \| 0 \| n\/a \| n\/a \| n\/a \|$/m);
+    assert.match(md, /^\| other humans \| 0 \| 0 \| 0 \| n\/a \| n\/a \| n\/a \|$/m);
+});
+
+test('CLI with the weekly run\'s arguments: --input, --window-days, --json-out', () => {
+    // .github/workflows/pr-metrics.yml runs
+    //   node scripts/pr-metrics.mjs --input prs.json --window-days "$WINDOW_DAYS" --json-out pr-metrics.json
+    const script = fileURLToPath(new URL('../pr-metrics.mjs', import.meta.url));
+    const dir = mkdtempSync(join(tmpdir(), 'oaa-prm-'));
+    const input = join(dir, 'prs.json');
+    const jsonOut = join(dir, 'pr-metrics.json');
+    const prs = [merged(1, human, 10 * DAY, HOUR), merged(2, hive, 2 * DAY, HOUR)];
+    writeFileSync(input, JSON.stringify(prs));
+    const md = execFileSync(
+        process.execPath,
+        [script, '--input', input, '--window-days', '7', '--json-out', jsonOut, '--now', NOW],
+        { input: '', encoding: 'utf8' },
+    );
+    assert.match(md, /^## Last 7 days$/m);
+    assert.match(md, /from 2 PRs\./);
+    const json = JSON.parse(readFileSync(jsonOut, 'utf8'));
+    assert.deepEqual(json, computeMetrics(prs, { now: NOW, windowDays: 7 }));
+    assert.equal(json.windows.last7d.overall.merged, 1);
+    assert.equal(json.windows.all.overall.merged, 2);
+});
+
+test('CLI --owner and --format markdown', () => {
+    const script = fileURLToPath(new URL('../pr-metrics.mjs', import.meta.url));
+    const input = JSON.stringify([merged(1, { login: 'someone', is_bot: false }, 2 * DAY, HOUR)]);
+    const out = execFileSync(process.execPath, [script, '--now', NOW, '--owner', 'someone', '--format', 'json'], { input, encoding: 'utf8' });
+    assert.equal(JSON.parse(out).windows.all.byAuthorClass.owner.merged, 1);
+    const md = execFileSync(process.execPath, [script, '--now', NOW, '--format', 'markdown'], { input, encoding: 'utf8' });
+    assert.match(md, /^# PR metrics$/m);
+});
+
+test('CLI rejects bad arguments with exit 1 and a message', () => {
+    const script = fileURLToPath(new URL('../pr-metrics.mjs', import.meta.url));
+    const cases = [
+        [['--bogus'], /unknown argument: --bogus/],
+        [['--format', 'xml'], /--format must be markdown or json/],
+        [['--window-days', '0'], /--window-days must be a positive number/],
+        [['--window-days', 'abc'], /--window-days must be a positive number/],
+        [['--input'], /--input needs a value/],
+    ];
+    for (const [args, message] of cases) {
+        assert.throws(
+            () => execFileSync(process.execPath, [script, ...args], { input: '[]', stdio: 'pipe' }),
+            (err) => err.status === 1 && message.test(String(err.stderr)),
+            args.join(' '),
+        );
+    }
 });
