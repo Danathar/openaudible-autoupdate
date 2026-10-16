@@ -22,7 +22,8 @@ own version manifest and upgrades the installed rpm automatically.
 `openaudible-autoupdate.sh`:
 
 1. Reads the installed version with `rpm -q OpenAudible`.
-2. Fetches `https://openaudible.org/downloads/swt_version.json`, which lists
+2. Fetches `https://openaudible.org/downloads/swt_version.json` over https
+   only (redirects included), which lists
    the current release version and, per platform, a download URL and
    `sha256` checksum.
 3. Checks the manifest before using it: it must be a JSON object, the version

@@ -153,7 +153,7 @@ publish_release() {
   jq -n --arg v "$version" --arg f "$file" --arg k "$key" --arg s "$sum" \
     '{version: $v, download_dir: "https://stub.test/dl/",
       platforms: {($k): {file: $f, sha256: $s}}}' >"$SERVER/swt_version.json"
-  export VERSION_URL="http://stub.test/swt_version.json"
+  export VERSION_URL="https://stub.test/swt_version.json"
 }
 
 # set_manifest_field FILTER

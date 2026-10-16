@@ -22,7 +22,7 @@ repository and its workflow tokens.
 Trust boundaries, from least to most trusted:
 
 1. **The manifest** (`https://openaudible.org/downloads/swt_version.json`,
-   `VERSION_URL` in `openaudible-autoupdate.sh`). Fetched with `curl -fsSL`.
+   `VERSION_URL` in `openaudible-autoupdate.sh`). Fetched with `curl -fsSL --proto =https --proto-redir =https`.
    Anyone who can change the manifest or intercept the connection controls
    `version`, `download_dir`, `platforms.<key>.file` and
    `platforms.<key>.sha256`. **The manifest is untrusted input.**

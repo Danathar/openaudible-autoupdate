@@ -71,10 +71,10 @@ assert_tmp_clean() {
 # --- manifest fetch / parsing ----------------------------------------------
 
 @test "manifest fetch failure exits 1 and reports the URL" {
-  export VERSION_URL="http://stub.test/does-not-exist.json"
+  export VERSION_URL="https://stub.test/does-not-exist.json"
   run_script
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Failed to fetch version manifest from http://stub.test/does-not-exist.json"* ]]
+  [[ "$output" == *"Failed to fetch version manifest from https://stub.test/does-not-exist.json"* ]]
   [[ "$(calls)" != *"dnf "* ]]
 }
 
@@ -92,7 +92,7 @@ assert_tmp_clean() {
   printf '<html><body>maintenance</body></html>\n' >"$SERVER/swt_version.json"
   run_script
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Invalid version manifest from http://stub.test/swt_version.json (not a JSON object)."* ]]
+  [[ "$output" == *"Invalid version manifest from https://stub.test/swt_version.json (not a JSON object)."* ]]
   [[ "$(calls)" != *"/dl/"* ]]
   [[ "$(calls)" != *"dnf "* ]]
   assert_tmp_clean
@@ -279,6 +279,13 @@ assert_rejected_before_download() {
   [[ "$(calls)" == *"curl-protos --proto =https --proto-redir =https https://stub.test/dl/OpenAudible-2.0.0.x86_64.rpm"* ]]
 }
 
+@test "manifest fetch is restricted to https, including redirects" {
+  publish_release 2.0.0
+  run_script
+  [ "$status" -eq 0 ]
+  [[ "$(calls)" == *"curl-protos --proto =https --proto-redir =https $VERSION_URL"* ]]
+}
+
 @test "rpm header is checked after the checksum and before sudo dnf" {
   publish_release 2.0.0
   run_script
@@ -422,10 +429,10 @@ assert_not_installed_after_verify() {
 
 @test "VERSION_URL override is the URL fetched" {
   publish_release 1.0.0
-  export VERSION_URL="http://mirror.test/custom/swt_version.json"
+  export VERSION_URL="https://mirror.test/custom/swt_version.json"
   run_script
   [ "$status" -eq 0 ]
-  [[ "$(calls)" == *"curl http://mirror.test/custom/swt_version.json"* ]]
+  [[ "$(calls)" == *"curl https://mirror.test/custom/swt_version.json"* ]]
 }
 
 @test "default VERSION_URL points at openaudible.org" {
@@ -493,7 +500,7 @@ assert_not_installed_after_verify() {
 }
 
 @test "temp dir is removed after a manifest fetch failure" {
-  export VERSION_URL="http://stub.test/nope.json"
+  export VERSION_URL="https://stub.test/nope.json"
   run_script
   [ "$status" -eq 1 ]
   assert_tmp_clean

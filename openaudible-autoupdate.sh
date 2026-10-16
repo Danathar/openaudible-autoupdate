@@ -33,7 +33,7 @@ if ! installed_version=$(rpm -q --qf '%{VERSION}' "$PKG_NAME" 2>/dev/null); then
 fi
 
 manifest="$WORKDIR/version.json"
-if ! curl -fsSL "$VERSION_URL" -o "$manifest"; then
+if ! curl -fsSL --proto =https --proto-redir =https "$VERSION_URL" -o "$manifest"; then
   log "Failed to fetch version manifest from $VERSION_URL"
   exit 1
 fi
