@@ -112,6 +112,9 @@ const allowed = [
     'git -c push.default=current push origin main',
     'gh pr create --repo Danathar/openaudible-autoupdate --base main --head b --body "-Bump deps" --title "-Hx"',
     'git config --get remote.origin.url',
+    'git config --show-origin --list',
+    'git config --show-scope --get remote.origin.url',
+    'git config get --show-origin remote.origin.url',
     'git config remote.origin.url',
     'git config user.name x',
     'env FOO=1 git status',
@@ -387,6 +390,12 @@ const blocked = [
     ['git config edit', 'could redirect'],
     ['git config -f .git/config remote.origin.url https://github.com/someone/other.git', 'could redirect'],
     ['git config --file=x --type bool remote.origin.url v', 'could redirect'],
+    // --show-origin/--show-scope only change how a read is printed; git 2.47
+    // still writes `key value` with --show-scope, so they do not make it a read.
+    ['git config --show-scope remote.origin.url https://github.com/someone/other.git', 'could redirect'],
+    ['git config --show-origin remote.origin.url https://github.com/someone/other.git', 'could redirect'],
+    ['git config --show-scope url.https://github.com/someone/.insteadOf https://github.com/Danathar/', 'could redirect'],
+    ['git config set --show-scope remote.origin.pushurl https://github.com/someone/other.git', 'could redirect'],
     ['gh pr create --repo Danathar/openaudible-autoupdate --base main --head b --title t -Bdevelop', '--base main'],
     ['declare -x GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url; git push origin main', 'redirect'],
     ['git config set --value zzz remote.origin.url https://github.com/someone/other.git', 'could redirect'],
@@ -441,6 +450,11 @@ const blocked = [
     ['bats tests/../openaudible-autoupdat?.sh', 'would execute'],
     ['bats openaudible-autoupdate.s[h]', 'would execute'],
     ['bats openaudible[[:punct:]]autoupdate.sh', 'would execute'],
+    // An unclosed `[:` (or `[=`, `[.`) is not a class: the shell reads the `[`
+    // as one more member of the set, so `[[:a]` still matches the `a`.
+    ['bash ./openaudible-autoupd[[:a]te.sh', 'would execute'],
+    ['bats openaudible-autoupd[[=a]te.sh', 'would execute'],
+    ['bats openaudible-autoupd[[.a]te.sh', 'would execute'],
     ['bats open[!x]udible-autoupdate', 'would execute'],
     ['bats openaudible-autoupdate.{sh,}', 'would execute'],
     ['bats *', 'would execute'],
