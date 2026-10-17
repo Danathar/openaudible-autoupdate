@@ -114,6 +114,7 @@ const allowed = [
     'git config --get remote.origin.url',
     'git config --show-origin --list',
     'git config --show-scope --get remote.origin.url',
+    'git config --get-urlmatch remote.origin.url https://github.com/Danathar/',
     'git config get --show-origin remote.origin.url',
     'git config remote.origin.url',
     'git config user.name x',
@@ -455,6 +456,15 @@ const blocked = [
     ['bash ./openaudible-autoupd[[:a]te.sh', 'would execute'],
     ['bats openaudible-autoupd[[=a]te.sh', 'would execute'],
     ['bats openaudible-autoupd[[.a]te.sh', 'would execute'],
+    // A closed `[=a=]` / `[.a.]` is a class inside the set, and its `]` does not
+    // end the set. bash matches the `a` in each of these.
+    ['bats openaudible-autoupd[[=a=]]te.sh', 'would execute'],
+    ['bats openaudible-autoupd[[.a.]]te.sh', 'would execute'],
+    // `[.].]` is the collating symbol `]`: the `.` that opens it does not
+    // also close it.
+    ['bats openaudible-autoupd[[.].]a]te.sh', 'would execute'],
+    // An empty class `[..]` closes right after it opens.
+    ['bats openaudible-autoupd[[..]a]te.sh', 'would execute'],
     ['bats open[!x]udible-autoupdate', 'would execute'],
     ['bats openaudible-autoupdate.{sh,}', 'would execute'],
     ['bats *', 'would execute'],
