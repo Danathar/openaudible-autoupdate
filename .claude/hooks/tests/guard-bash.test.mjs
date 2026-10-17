@@ -226,6 +226,19 @@ const allowed = [
     'podman ps',
     'gh pr view https://github.com/someone/other/pull/9',
     'gh pr create --repo Danathar/openaudible-autoupdate --base main --head acmm/claude-learning --title t --body "never run sudo"',
+    // --- writes and reads that name this repository or only look ---
+    'git push -o ci.skip origin main',
+    'git remote add origin https://github.com/Danathar/openaudible-autoupdate',
+    'gh repo edit Danathar/openaudible-autoupdate --description x',
+    'gh repo edit -R Danathar/openaudible-autoupdate --description x',
+    'GH_REPO=Danathar/openaudible-autoupdate gh repo edit --description x',
+    'git config --get-regexp remote.origin github.com',
+    'export GIT_PAGER=cat; git log',
+    // quoted text is not a substitution
+    "echo '$(sudo true)'",
+    'echo "<(sudo true)"',
+    // the e2e harness may mount the updater into a throwaway container
+    'podman run --rm -v ./openaudible-autoupdate.sh:/x img tests/e2e/in-container.sh',
 ];
 
 const blocked = [
@@ -628,6 +641,38 @@ const blocked = [
     ["printf '%s\\n' +n -c id | xargs bash -n", 'xargs bash'],
     ["echo --import=data:text/javascript,0 | xargs -n9 node --test", 'xargs node'],
     ['find . -name x | xargs -I{} timeout 5 git diff {}', 'xargs git'],
+    // --- each spelling of a gh api body or graphql input file on its own ---
+    ['gh api repos/other/x/issues --field=title=x', 'implicit POST'],
+    ['gh api repos/other/x/issues -ftitle=x', 'implicit POST'],
+    ['gh api graphql -f query={viewer{login}} --input q.json', 'inline literal'],
+    // --- git push / remote spellings ---
+    ['git push --repo=https://x origin main', '--repo'],
+    ['git remote set-url --push fork https://github.com/Danathar/openaudible-autoupdate', 'set-url --push fork'],
+    // --- bracket expressions: a `]` right after `[`, `[!` or `[^` is a member; `:` alone is a member ---
+    ['bats openaudible[!]x]autoupdate.sh', 'would execute'],
+    ['bats openaudible[^]x]autoupdate.sh', 'would execute'],
+    ['bats openaudible[]-]autoupdate.sh', 'would execute'],
+    ['bats openaudible[-:]autoupdate.sh', 'would execute'],
+    // a stubs PATH entry with `..` in it never qualifies, even when it resolves to tests/stubs
+    ['PATH=$CLAUDE_PROJECT_DIR/tests/../tests/stubs:$PATH bats openaudible-autoupdate.sh', 'would execute'],
+    // --- dnf without sudo, and a package named like a read-only verb ---
+    ['dnf install foo', 'dnf install'],
+    ['dnf5 install foo', 'dnf5 install'],
+    ['dnf install list', 'dnf install'],
+    ['distrobox enter mybox', 'distrobox enter'],
+    // --- wrappers: a -v flag is only `command -v`'s lookup; env -S after other env words ---
+    ['timeout -v 5 sudo dnf install x', 'sudo'],
+    ['env -v sudo dnf install x', 'sudo'],
+    ["env FOO=1 -S 'sudo dnf install x'", 'sudo'],
+    ["env -i -S 'sudo dnf install x'", 'sudo'],
+    ["env -S 'echo hi; sudo true'", 'sudo'],
+    ['systemd-run --user /opt/openaudible-autoupdate-v2.sh', 'outside any stub'],
+    // --- tokenizer: `#` inside a word is not a comment; subshells and process substitutions ---
+    ['echo a#b; sudo true', 'sudo'],
+    ['(sudo true)', 'sudo'],
+    ['true && (sudo true)', 'sudo'],
+    ['diff <(sudo cat /etc/shadow) x', 'sudo'],
+    ['echo >(sudo tee x)', 'sudo'],
 ];
 
 for (const command of allowed) {
