@@ -98,7 +98,9 @@
 // (`cat openaudible-autoupdate.sh | bash`, `bash -s < openaudible-autoupdate.sh`,
 // `bash -c "$(cat openaudible-autoupdate.sh)"`) counts as running it. Quoted
 // heredoc bodies are data. Wrappers (env, timeout, xargs, ...) are looked
-// through to the command they run, not to a later argument. Deliberate
+// through to the command they run, not to a later argument; their options are
+// read as getopt reads them, so a packed (`env -iu X`) or abbreviated
+// (`env --uns X`) option's value is not taken for the command. Deliberate
 // obfuscation (variables, built strings, scripts written then run) stays out of scope.
 //
 // Read-only gh commands (view, list, status, diff, checks, api GET, ...) are
@@ -1130,11 +1132,66 @@ function checkSystemctl(args) {
 const WRAPPER_VALUE_OPTS = {
     timeout: ['-s', '--signal', '-k', '--kill-after'],
     nice: ['-n', '--adjustment'],
-    xargs: ['-n', '-I', '-L', '-P', '-s', '-d', '-E', '-a', '--max-args', '--max-procs', '--delimiter', '--arg-file'],
-    stdbuf: ['-i', '-o', '-e'],
-    ionice: ['-c', '-n', '-p', '-P', '-u'],
+    xargs: ['-n', '-I', '-L', '-P', '-s', '-d', '-E', '-a', '--max-args', '--max-procs', '--max-chars', '--delimiter', '--arg-file', '--process-slot-var'],
+    stdbuf: ['-i', '-o', '-e', '--input', '--output', '--error'],
+    ionice: ['-c', '-n', '-p', '-P', '-u', '--class', '--classdata', '--pid', '--pgid', '--uid'],
     env: ['-u', '--unset', '-C', '--chdir'],
+    exec: ['-a'],
 };
+
+// Each wrapper's options as getopt reads them: the short letters that take a
+// value, and every long name (getopt_long accepts any unambiguous prefix).
+const WRAPPER_GETOPT = {
+    env: { value: 'uCS', long: ['ignore-environment', 'null', 'unset', 'chdir', 'split-string', 'block-signal', 'default-signal', 'ignore-signal', 'list-signal-handling', 'debug'] },
+    timeout: { value: 'sk', long: ['signal', 'kill-after', 'foreground', 'preserve-status', 'verbose'] },
+    nice: { value: 'n', long: ['adjustment'] },
+    stdbuf: { value: 'ioe', long: ['input', 'output', 'error'] },
+    ionice: { value: 'cnpPu', long: ['class', 'classdata', 'pid', 'pgid', 'uid', 'ignore'] },
+    xargs: { value: 'adEILnPs', long: ['arg-file', 'delimiter', 'eof', 'replace', 'max-lines', 'max-args', 'max-procs', 'max-chars', 'process-slot-var', 'null', 'open-tty', 'interactive', 'no-run-if-empty', 'verbose', 'exit', 'show-limits'] },
+    exec: { value: 'a', long: [] },
+};
+
+/**
+ * Rewrite a wrapper's leading options into the one-option-per-word, full-name
+ * form the checks below match: `env -iu X` -> `env -i -u X`, `timeout -vk 5`
+ * -> `timeout -v -k 5`, `env --uns X` -> `env --unset X`. Otherwise the value
+ * of a packed or abbreviated option is taken for the command the wrapper runs.
+ */
+function expandWrapperOptions(cmd, w) {
+    const spec = WRAPPER_GETOPT[cmd];
+    if (!spec) return w;
+    const takesValue = WRAPPER_VALUE_OPTS[cmd] ?? [];
+    const out = [w[0]];
+    let k = 1;
+    for (; k < w.length; k++) {
+        const a = w[k];
+        if (a === '--' || a === '-' || !a.startsWith('-')) break;
+        if (a.startsWith('--')) {
+            const eq = a.indexOf('=');
+            const name = a.slice(2, eq === -1 ? undefined : eq);
+            const hits = spec.long.filter((l) => l.startsWith(name));
+            const full = `--${spec.long.includes(name) || hits.length !== 1 ? name : hits[0]}`;
+            if (eq !== -1) out.push(full + a.slice(eq));
+            else {
+                out.push(full);
+                if (takesValue.includes(full) && k + 1 < w.length) out.push(w[++k]);
+            }
+            continue;
+        }
+        for (let i = 1; i < a.length; i++) {
+            if (!spec.value.includes(a[i])) {
+                out.push(`-${a[i]}`);
+            } else if (i + 1 < a.length) {
+                out.push(`-${a[i]}${a.slice(i + 1)}`);
+                break;
+            } else {
+                out.push(`-${a[i]}`);
+                if (k + 1 < w.length) out.push(w[++k]);
+            }
+        }
+    }
+    return [...out, ...w.slice(k)];
+}
 
 /** Index of the command a wrapper (env, timeout, xargs, ...) runs, or -1 if there is none to analyse. */
 function wrapperTarget(w) {
@@ -1179,6 +1236,7 @@ function checkSegment(words, state) {
             return block(`Blocked: \`${cmd}\` (privilege escalation) is never run by agents in this repository.`);
         }
         if (!WRAPPERS.has(cmd)) break;
+        w = expandWrapperOptions(cmd, w);
         // `env -S 'gh pr create'` / `--split-string=...` runs a command string.
         // Only env's own leading options and NAME=value words are scanned; the
         // wrapped command's arguments (e.g. `--title -Sx`) are not env options.
