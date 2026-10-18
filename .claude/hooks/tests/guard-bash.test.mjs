@@ -717,6 +717,24 @@ const blocked = [
     ['exec -a x ./openaudible-autoupdate.sh', 'would execute'],
     // An attached value ends the pack (`-uXC` unsets XC).
     ['env -uXC ./openaudible-autoupdate.sh', 'would execute'],
+    // xargs -e, -i and -l take an optional value from the rest of the word
+    // only, so `-eP` sets the eof string to `P`; it is not `-e -P git`.
+    ['xargs -eP git push --force origin main', 'xargs git'],
+    ['xargs -lP git push --force origin main', 'xargs git'],
+    ['xargs -ed git push --force origin main', 'xargs git'],
+    ['xargs -0eP git push --force origin main', 'xargs git'],
+    ['xargs -iP gh pr merge 1', 'no --repo'],
+    ['xargs -eP gh pr merge 1', 'no --repo'],
+    ['xargs -rlP ./openaudible-autoupdate.sh', 'would execute'],
+    ['xargs -iE sudo id', 'sudo'],
+    ['xargs -is sudo id', 'sudo'],
+    // env's lone `-` is its old spelling of -i, not the command it runs.
+    ['env - git push --force origin main', 'force'],
+    ['env - X=1 git push --force origin main', 'force'],
+    ['env -i - git push --force origin main', 'force'],
+    ['env - gh pr merge 1', 'no --repo'],
+    ['env - ./openaudible-autoupdate.sh', 'would execute'],
+    ['env -i - sudo id', 'sudo'],
     ['systemd-run --user /opt/openaudible-autoupdate-v2.sh', 'outside any stub'],
     // --- tokenizer: `#` inside a word is not a comment; subshells and process substitutions ---
     ['echo a#b; sudo true', 'sudo'],
