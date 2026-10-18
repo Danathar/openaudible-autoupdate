@@ -1147,7 +1147,9 @@ const WRAPPER_GETOPT = {
     nice: { value: 'n', long: ['adjustment'] },
     stdbuf: { value: 'ioe', long: ['input', 'output', 'error'] },
     ionice: { value: 'cnpPu', long: ['class', 'classdata', 'pid', 'pgid', 'uid', 'ignore'] },
-    xargs: { value: 'adEILnPs', long: ['arg-file', 'delimiter', 'eof', 'replace', 'max-lines', 'max-args', 'max-procs', 'max-chars', 'process-slot-var', 'null', 'open-tty', 'interactive', 'no-run-if-empty', 'verbose', 'exit', 'show-limits'] },
+    // -e, -i and -l take an optional value, which getopt only reads from the
+    // rest of the same word: `xargs -eP cmd` sets the eof string to `P`.
+    xargs: { value: 'adEILnPs', optional: 'eil', long: ['arg-file', 'delimiter', 'eof', 'replace', 'max-lines', 'max-args', 'max-procs', 'max-chars', 'process-slot-var', 'null', 'open-tty', 'interactive', 'no-run-if-empty', 'verbose', 'exit', 'show-limits'] },
     exec: { value: 'a', long: [] },
 };
 
@@ -1165,6 +1167,11 @@ function expandWrapperOptions(cmd, w) {
     let k = 1;
     for (; k < w.length; k++) {
         const a = w[k];
+        // A lone `-` is env's old spelling of -i; anywhere else it ends the options.
+        if (a === '-' && cmd === 'env') {
+            out.push(a);
+            continue;
+        }
         if (a === '--' || a === '-' || !a.startsWith('-')) break;
         if (a.startsWith('--')) {
             const eq = a.indexOf('=');
@@ -1179,7 +1186,10 @@ function expandWrapperOptions(cmd, w) {
             continue;
         }
         for (let i = 1; i < a.length; i++) {
-            if (!spec.value.includes(a[i])) {
+            if (spec.optional?.includes(a[i])) {
+                out.push(`-${a[i]}${a.slice(i + 1)}`);
+                break;
+            } else if (!spec.value.includes(a[i])) {
                 out.push(`-${a[i]}`);
             } else if (i + 1 < a.length) {
                 out.push(`-${a[i]}${a.slice(i + 1)}`);
@@ -1201,7 +1211,7 @@ function wrapperTarget(w) {
     let needDuration = cmd === 'timeout';
     for (let k = 1; k < w.length; k++) {
         const a = w[k];
-        if (isAssignment(a) || a === '--') continue;
+        if (isAssignment(a) || a === '--' || (a === '-' && cmd === 'env')) continue;
         if (a.startsWith('-') && a.length > 1) {
             if (valueOpts.includes(a)) k++;
             continue;
