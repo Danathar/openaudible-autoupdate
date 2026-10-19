@@ -155,6 +155,9 @@ const allowed = [
     // Packed and abbreviated wrapper options still reach the command they wrap.
     'timeout 5 git status',
     'env -iu X git status',
+    'env -a X git status',
+    // -a's value is the $0 name, not an env -S command string.
+    "env -a '-Sgit push --force' git status",
     'nice --adj 5 shellcheck openaudible-autoupdate.sh',
     'cat openaudible-autoupdate.sh | wc -l',
     'cat openaudible-autoupdate.sh > /var/tmp/copy.sh',
@@ -717,6 +720,18 @@ const blocked = [
     ['exec -a x ./openaudible-autoupdate.sh', 'would execute'],
     // An attached value ends the pack (`-uXC` unsets XC).
     ['env -uXC ./openaudible-autoupdate.sh', 'would execute'],
+    // env -a (--argv0) takes a value: the name the wrapped command sees as $0.
+    ['env -a X git push --force origin main', 'force'],
+    ['env --argv0 X git push --force origin main', 'force'],
+    ['env --argv X git push --force origin main', 'force'],
+    ['env -ia X git push --force origin main', 'force'],
+    ['env -a X gh pr merge 1', 'no --repo'],
+    ['env -a X ./openaudible-autoupdate.sh', 'would execute'],
+    ['env -ia X ./openaudible-autoupdate.sh', 'would execute'],
+    ['env -a X sudo id', 'sudo'],
+    ['env -a -Sx ./openaudible-autoupdate.sh', 'would execute'],
+    // The value is one word even when it looks like a pack of env options.
+    ['env -a -iu git push --force origin main', 'force'],
     // xargs -e, -i and -l take an optional value from the rest of the word
     // only, so `-eP` sets the eof string to `P`; it is not `-e -P git`.
     ['xargs -eP git push --force origin main', 'xargs git'],
@@ -735,6 +750,22 @@ const blocked = [
     ['env - gh pr merge 1', 'no --repo'],
     ['env - ./openaudible-autoupdate.sh', 'would execute'],
     ['env -i - sudo id', 'sudo'],
+    // An option's value is one word, even when it looks like a pack of the
+    // wrapper's own options: `env -u -iu git` unsets `-iu` and runs git.
+    ['env -u -iu git push --force origin main', 'force'],
+    ['env -C -iu git push --force origin main', 'force'],
+    ['env --unset -iu git push --force origin main', 'force'],
+    ['xargs -a -rP git push --force origin main', 'xargs git'],
+    ['exec -a -la ./openaudible-autoupdate.sh', 'would execute'],
+    // A long option without a value does not swallow the pack after it.
+    ['timeout --foreground -vk 5 10 ./openaudible-autoupdate.sh', 'would execute'],
+    // A value attached inside a pack ends it: `-k5s` is a kill-after of 5s.
+    ['timeout -k5s 10 ./openaudible-autoupdate.sh', 'would execute'],
+    // Abbreviated long names are resolved before the -S and value checks.
+    ["env --split='git push --force origin main'", 'force'],
+    ["env --s='git push --force origin main'", 'force'],
+    ['xargs --process-slot-var V ./openaudible-autoupdate.sh', 'would execute'],
+    ['xargs --process V ./openaudible-autoupdate.sh', 'would execute'],
     ['systemd-run --user /opt/openaudible-autoupdate-v2.sh', 'outside any stub'],
     // --- tokenizer: `#` inside a word is not a comment; subshells and process substitutions ---
     ['echo a#b; sudo true', 'sudo'],
