@@ -735,6 +735,22 @@ const blocked = [
     ['env - gh pr merge 1', 'no --repo'],
     ['env - ./openaudible-autoupdate.sh', 'would execute'],
     ['env -i - sudo id', 'sudo'],
+    // An option's value is one word, even when it looks like a pack of the
+    // wrapper's own options: `env -u -iu git` unsets `-iu` and runs git.
+    ['env -u -iu git push --force origin main', 'force'],
+    ['env -C -iu git push --force origin main', 'force'],
+    ['env --unset -iu git push --force origin main', 'force'],
+    ['xargs -a -rP git push --force origin main', 'xargs git'],
+    ['exec -a -la ./openaudible-autoupdate.sh', 'would execute'],
+    // A long option without a value does not swallow the pack after it.
+    ['timeout --foreground -vk 5 10 ./openaudible-autoupdate.sh', 'would execute'],
+    // A value attached inside a pack ends it: `-k5s` is a kill-after of 5s.
+    ['timeout -k5s 10 ./openaudible-autoupdate.sh', 'would execute'],
+    // Abbreviated long names are resolved before the -S and value checks.
+    ["env --split='git push --force origin main'", 'force'],
+    ["env --s='git push --force origin main'", 'force'],
+    ['xargs --process-slot-var V ./openaudible-autoupdate.sh', 'would execute'],
+    ['xargs --process V ./openaudible-autoupdate.sh', 'would execute'],
     ['systemd-run --user /opt/openaudible-autoupdate-v2.sh', 'outside any stub'],
     // --- tokenizer: `#` inside a word is not a comment; subshells and process substitutions ---
     ['echo a#b; sudo true', 'sudo'],
