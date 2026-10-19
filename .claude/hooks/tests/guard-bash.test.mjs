@@ -155,6 +155,9 @@ const allowed = [
     // Packed and abbreviated wrapper options still reach the command they wrap.
     'timeout 5 git status',
     'env -iu X git status',
+    // `time` (keyword and /usr/bin/time) runs the command after its own options.
+    'time -p git status',
+    '/usr/bin/time -o /var/tmp/t git status',
     'env -a X git status',
     // -a's value is the $0 name, not an env -S command string.
     "env -a '-Sgit push --force' git status",
@@ -743,6 +746,15 @@ const blocked = [
     ['xargs -rlP ./openaudible-autoupdate.sh', 'would execute'],
     ['xargs -iE sudo id', 'sudo'],
     ['xargs -is sudo id', 'sudo'],
+    // --- time: the keyword's -p/-- and /usr/bin/time's options are skipped ---
+    ['time -p sudo id', 'sudo'],
+    ['time -- sudo id', 'sudo'],
+    ['/usr/bin/time sudo id', 'sudo'],
+    ['/usr/bin/time --out x sudo id', 'sudo'],
+    ['/usr/bin/time -po x sudo id', 'sudo'],
+    ['time -p git push --force origin main', 'force'],
+    ['/usr/bin/time -f %e git push --force origin main', 'force'],
+    ['time -p ./openaudible-autoupdate.sh', 'would execute'],
     // env's lone `-` is its old spelling of -i, not the command it runs.
     ['env - git push --force origin main', 'force'],
     ['env - X=1 git push --force origin main', 'force'],
