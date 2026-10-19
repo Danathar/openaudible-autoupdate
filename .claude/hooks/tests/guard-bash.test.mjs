@@ -155,6 +155,9 @@ const allowed = [
     // Packed and abbreviated wrapper options still reach the command they wrap.
     'timeout 5 git status',
     'env -iu X git status',
+    'env -a X git status',
+    // -a's value is the $0 name, not an env -S command string.
+    "env -a '-Sgit push --force' git status",
     'nice --adj 5 shellcheck openaudible-autoupdate.sh',
     'cat openaudible-autoupdate.sh | wc -l',
     'cat openaudible-autoupdate.sh > /var/tmp/copy.sh',
@@ -717,6 +720,18 @@ const blocked = [
     ['exec -a x ./openaudible-autoupdate.sh', 'would execute'],
     // An attached value ends the pack (`-uXC` unsets XC).
     ['env -uXC ./openaudible-autoupdate.sh', 'would execute'],
+    // env -a (--argv0) takes a value: the name the wrapped command sees as $0.
+    ['env -a X git push --force origin main', 'force'],
+    ['env --argv0 X git push --force origin main', 'force'],
+    ['env --argv X git push --force origin main', 'force'],
+    ['env -ia X git push --force origin main', 'force'],
+    ['env -a X gh pr merge 1', 'no --repo'],
+    ['env -a X ./openaudible-autoupdate.sh', 'would execute'],
+    ['env -ia X ./openaudible-autoupdate.sh', 'would execute'],
+    ['env -a X sudo id', 'sudo'],
+    ['env -a -Sx ./openaudible-autoupdate.sh', 'would execute'],
+    // The value is one word even when it looks like a pack of env options.
+    ['env -a -iu git push --force origin main', 'force'],
     // xargs -e, -i and -l take an optional value from the rest of the word
     // only, so `-eP` sets the eof string to `P`; it is not `-e -P git`.
     ['xargs -eP git push --force origin main', 'xargs git'],
