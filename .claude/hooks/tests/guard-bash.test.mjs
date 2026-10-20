@@ -895,6 +895,10 @@ const blocked = [
     ['watch --int 1 sudo id', 'sudo'],
     ['watch --eq 1 sudo id', 'sudo'],
     ['chrt -vT 5 0 sudo id', 'sudo'],
+    // chrt reads its priority with strtol: a sign or leading blanks still make the word the priority.
+    ['chrt -o +0 sudo id', 'sudo'],
+    ['chrt -o -- -0 sudo id', 'sudo'],
+    ["chrt -b ' 0' sudo id", 'sudo'],
     ['unshare -rS 0 sudo id', 'sudo'],
     ['unshare --setu 0 sudo id', 'sudo'],
     ['unshare -l X sudo id', 'sudo'],
