@@ -755,6 +755,20 @@ const blocked = [
     ['time -p git push --force origin main', 'force'],
     ['/usr/bin/time -f %e git push --force origin main', 'force'],
     ['time -p ./openaudible-autoupdate.sh', 'would execute'],
+    // bash's grammar is `time [-p] [!] pipeline`: the `!` after time is a keyword.
+    ['time -p ! sudo id', 'sudo'],
+    // --format and its abbreviation take the next word, like -f.
+    ['/usr/bin/time --format %e sudo id', 'sudo'],
+    ['/usr/bin/time --form %e git push --force origin main', 'force'],
+    // -a/--append, -v and -q take no value: the word after them is not skipped.
+    ['/usr/bin/time --append --output x git push --force origin main', 'force'],
+    ['/usr/bin/time -ao /var/tmp/t sudo id', 'sudo'],
+    ['/usr/bin/time -vo /var/tmp/t sudo id', 'sudo'],
+    ['/usr/bin/time -qo /var/tmp/t sudo id', 'sudo'],
+    // A value attached to -f or -o is the rest of the word, even when it ends
+    // in o: `-f%o` is the format "%o", `-otime.o` writes to time.o.
+    ['/usr/bin/time -f%o git push --force origin main', 'force'],
+    ['/usr/bin/time -otime.o git push --force origin main', 'force'],
     // env's lone `-` is its old spelling of -i, not the command it runs.
     ['env - git push --force origin main', 'force'],
     ['env - X=1 git push --force origin main', 'force'],
