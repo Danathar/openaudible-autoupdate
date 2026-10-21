@@ -288,6 +288,12 @@ const allowed = [
     'which sudo',
     'man git',
     "grep -rn 'git push --force' docs",
+    "printf '%s\\n' 'git push --force'",
+    "egrep 'sudo|dnf' docs",
+    "fgrep 'git push --force' docs",
+    'whereis sudo',
+    // eight checked commands behind one program is the most still read
+    `setarch x86_64 ${'git status '.repeat(8)}`,
 ];
 
 const blocked = [
@@ -907,6 +913,11 @@ const blocked = [
     ['chrt -o +0 sudo id', 'sudo'],
     ['chrt -o -- -0 sudo id', 'sudo'],
     ["chrt -b ' 0' sudo id", 'sudo'],
+    // the updater is not read behind a program the hook does not list, so these
+    // pass only if chrt's priority is read and the updater taken as its command
+    ['chrt -o +0 ./openaudible-autoupdate.sh', 'would execute'],
+    ['chrt -o -- -0 ./openaudible-autoupdate.sh', 'would execute'],
+    ["chrt -b ' 0' ./openaudible-autoupdate.sh", 'would execute'],
     ['unshare -rS 0 sudo id', 'sudo'],
     ['unshare --setu 0 sudo id', 'sudo'],
     ['unshare -l X sudo id', 'sudo'],
@@ -940,6 +951,23 @@ const blocked = [
     ['script -qc "git push --force origin main" /dev/null', '`script` runs a command'],
     ["script -qc'sudo id' /dev/null", 'privilege escalation'],
     [`setarch x86_64 ${'git status '.repeat(9)}`, 'more than 8 commands'],
+    // assignments in front of the checked command are read with it
+    ['setarch x86_64 GIT_EXTERNAL_DIFF=x git diff', '`setarch` runs a command'],
+    // a checked command named by its path
+    ['setarch x86_64 /usr/bin/sudo id', '`setarch` runs a command'],
+    // find, watch and flock behind such a program are looked through to the updater
+    ['setarch x86_64 find . -exec ./openaudible-autoupdate.sh ;', '`setarch` runs a command'],
+    ['setarch x86_64 watch ./openaudible-autoupdate.sh', '`setarch` runs a command'],
+    ['setarch x86_64 flock /tmp/l ./openaudible-autoupdate.sh', '`setarch` runs a command'],
+    // command strings: a long option's `=` value, a one-letter cluster, a value
+    // that opens with a quote, and quotes and `;` inside the string
+    ["script --command='sudo id' /dev/null", '`script` runs a command'],
+    ["script -c'sudo id' /dev/null", '`script` runs a command'],
+    [`script -c'"sudo" id' /dev/null`, '`script` runs a command'],
+    [`script -qc "'sudo' id" /dev/null`, '`script` runs a command'],
+    ["script -qc 'true;sudo id' /dev/null", '`script` runs a command'],
+    // a later tail that passes does not undo an earlier refusal
+    ["script -c'sudo id; git status' /dev/null", '`script` runs a command'],
 ];
 
 for (const command of allowed) {
@@ -993,6 +1021,7 @@ test('a command still being read past the budget is refused, not left to the hoo
     const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { input, encoding: 'utf8' });
     assert.equal(r.status, 2, r.stderr);
     assert.match(r.stderr, /could not finish checking the command within/);
+    assert.doesNotMatch(r.stderr, /internal error/);
 });
 
 test('an internal error fails closed (exit 2), not open', () => {
