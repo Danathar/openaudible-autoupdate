@@ -1420,6 +1420,16 @@ function namesCheckedCommand(a) {
 }
 
 /**
+ * The word as the shell would look it up: quotes, backslashes and `$` removed.
+ * A shell drops quotes and backslashes before it looks a name up, so `s""udo`,
+ * `su\do` and `$'sudo'` (which the tokenizer leaves as `$sudo`) inside a
+ * command string all run sudo. Removing more can only refuse more.
+ */
+function unquoted(a) {
+    return a.replace(/[$"'\\]/g, '');
+}
+
+/**
  * The command strings a word may hand to a shell: the word itself when it
  * holds more than one word of its own (`script -c 'git push --force'`), or a
  * value attached to an option in the same word: after the `=` of a long
@@ -1459,7 +1469,7 @@ function checkUnlistedProgram(w, inlineEnv, state) {
     for (let n = 1; n < w.length; n++) {
         spend();
         let refusal = null;
-        if (namesCheckedCommand(w[n])) {
+        if (namesCheckedCommand(w[n]) || namesCheckedCommand(unquoted(w[n]))) {
             if (++checked > MAX_UNLISTED_INNER) {
                 return block(
                     `Blocked: more than ${MAX_UNLISTED_INNER} commands this hook checks behind \`${basename(cmd)}\`, ` +
@@ -1473,7 +1483,8 @@ function checkUnlistedProgram(w, inlineEnv, state) {
         if (!refusal) {
             for (const text of commandStrings(w[n])) {
                 spend();
-                if (!text.split(COMMAND_STRING_SEPARATORS).some((piece) => piece && namesCheckedCommand(piece))) continue;
+                const names = (t) => t.split(COMMAND_STRING_SEPARATORS).some((piece) => piece && namesCheckedCommand(piece));
+                if (!names(text) && !names(unquoted(text))) continue;
                 refusal = checkCommand(text, Object.create(state));
                 if (refusal) break;
             }
