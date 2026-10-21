@@ -282,6 +282,7 @@ const allowed = [
     'podman run --rm -v ./openaudible-autoupdate.sh:/x img tests/e2e/in-container.sh',
     // Behind a program this hook does not list, a command that passes alone
     // still passes, and programs that only print or look up words are not read.
+    "script -qc 'g\"\"it status' /dev/null",
     'setarch x86_64 git status',
     'strace -f git log -1',
     'prlimit node --test .claude/hooks/tests/',
@@ -948,6 +949,12 @@ const blocked = [
     ['setarch x86_64 gh pr create --repo other/repo --title t --body b', '`setarch` runs a command'],
     ['strace -f podman exec -it box sh', '`strace` runs a command'],
     ['GIT_EXTERNAL_DIFF=x setarch x86_64 git diff', '`setarch` runs a command'],
+    // the shell drops quotes and backslashes before it looks a name up
+    ["script -qc 's\"\"udo id' /dev/null", 'privilege escalation'],
+    ["script -qc 'su\\do id' /dev/null", 'privilege escalation'],
+    ["script -qc 'g\"\"it push --force origin main' /dev/null", '`script` runs a command'],
+    ["setarch x86_64 $'sudo' id", '`setarch` runs a command'],
+    ["script -qc $'sudo id' /dev/null", '`script` runs a command'],
     ['script -qc "git push --force origin main" /dev/null', '`script` runs a command'],
     ["script -qc'sudo id' /dev/null", 'privilege escalation'],
     [`setarch x86_64 ${'git status '.repeat(9)}`, 'more than 8 commands'],
