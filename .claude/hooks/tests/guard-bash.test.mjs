@@ -280,6 +280,14 @@ const allowed = [
     'echo "<(sudo true)"',
     // the e2e harness may mount the updater into a throwaway container
     'podman run --rm -v ./openaudible-autoupdate.sh:/x img tests/e2e/in-container.sh',
+    // Behind a program this hook does not list, a command that passes alone
+    // still passes, and programs that only print or look up words are not read.
+    'setarch x86_64 git status',
+    'strace -f git log -1',
+    'prlimit node --test .claude/hooks/tests/',
+    'which sudo',
+    'man git',
+    "grep -rn 'git push --force' docs",
 ];
 
 const blocked = [
@@ -916,6 +924,22 @@ const blocked = [
     ['true && (sudo true)', 'sudo'],
     ['diff <(sudo cat /etc/shadow) x', 'sudo'],
     ['echo >(sudo tee x)', 'sudo'],
+    // --- any other program that runs the words after it, or hands a shell one
+    // string: what it would run is checked as though it stood alone ---
+    ['setarch x86_64 sudo dnf install -y x', 'privilege escalation'],
+    ['setarch x86_64 git push --force origin main', '`setarch` runs a command'],
+    ['prlimit --nofile=1024 git push --force origin main', '`prlimit` runs a command'],
+    ['strace -o log git diff --no-index /dev/null .env', '`strace` runs a command'],
+    ['linux64 rpm -i x.rpm', '`linux64` runs a command'],
+    ['faketime now dnf upgrade -y', '`faketime` runs a command'],
+    ['prlimit bash openaudible-autoupdate.sh', '`prlimit` runs a command'],
+    ['setarch x86_64 bats openaudible-autoupdate.sh', '`setarch` runs a command'],
+    ['setarch x86_64 gh pr create --repo other/repo --title t --body b', '`setarch` runs a command'],
+    ['strace -f podman exec -it box sh', '`strace` runs a command'],
+    ['GIT_EXTERNAL_DIFF=x setarch x86_64 git diff', '`setarch` runs a command'],
+    ['script -qc "git push --force origin main" /dev/null', '`script` runs a command'],
+    ["script -qc'sudo id' /dev/null", 'privilege escalation'],
+    [`setarch x86_64 ${'git status '.repeat(9)}`, 'more than 8 commands'],
 ];
 
 for (const command of allowed) {
@@ -958,6 +982,17 @@ test('still blocks when the hook is invoked through a symlinked path', () => {
     const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'sudo true' } });
     const r = spawnSync(process.execPath, [link], { input, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: PROJECT } });
     assert.equal(r.status, 2, r.stderr);
+});
+
+test('a command still being read past the budget is refused, not left to the hook timeout', () => {
+    // Every tail of a long short-option cluster is read, which grows with the
+    // square of the word, and Claude Code runs the command when the hook times out.
+    const code = `import { main } from ${JSON.stringify(HOOK)}; main(undefined, 1);`;
+    const command = `true -${'a'.repeat(20000)}cgit log`;
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command } });
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { input, encoding: 'utf8' });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /could not finish checking the command within/);
 });
 
 test('an internal error fails closed (exit 2), not open', () => {
