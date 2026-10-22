@@ -310,6 +310,16 @@ const allowed = [
     "awk -F: '$1 == \"root\" {print $7}' /etc/passwd",
     "sed 's/\\x67it/git/' docs/strategy.md",
     'echo {git,} diff --no-index /dev/null .env',
+    // a bare wildcard command name passes when the command it reads as would
+    // (#138), and a bare wildcard later on a line names no command
+    'g?t status',
+    'ls g?t',
+    'ls *',
+    'cat ???',
+    'setarch x86_64 ls *',
+    'setarch x86_64 ls g?t',
+    '[ -f x ]',
+    '[[ -f x ]]',
 ];
 
 const blocked = [
@@ -1014,6 +1024,20 @@ const blocked = [
     ["printf '%s\\n' a | xargs /usr/bin/g?t log", 'xargs'],
     // a word whose braces make too many forms to read is refused unread
     ['{{,}{,}{,}{,}{,}{,}{,}{,}{,}{,}{,},git} diff', 'too many to read'],
+    // --- a bare wildcard command name (#138): the shell matches it against the
+    // working directory, then looks the word it expands to up on the PATH, so
+    // after `touch git` the word `g?t` runs /usr/bin/git ---
+    ['touch git; g?t push --force', 'reads the command name'],
+    ['touch git && g?t push --force origin main', 'force push'],
+    ['g?t diff --no-index /dev/null .env', 'reads the command name'],
+    ['g[i]t push -f', 'force push'],
+    ['??? push --force', 'reads the command name'],
+    ['nice g?t push --force', 'reads the command name'],
+    ['timeout 5 g?t push -f', 'force push'],
+    ['env g?t push -f', 'force push'],
+    ['setarch x86_64 g?t push --force', 'reads the command name'],
+    ["sh -c 'g?t push --force'", 'force push'],
+    ['su?o id', 'privilege escalation'],
 ];
 
 for (const command of allowed) {
