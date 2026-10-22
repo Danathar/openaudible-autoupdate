@@ -1455,12 +1455,13 @@ function* commandStrings(word) {
 // Bash reads a command word before it looks the program up: it decodes
 // `$'...'` escapes (`$'\x67it'` is `git`), drops quotes and backslashes,
 // expands brace groups (`{git,}` is `git`, the empty word dropped; `{git,diff}`
-// is `git diff`) and matches a word holding a `/` and a wildcard against the
-// filesystem (`/usr/bin/g?t` is `/usr/bin/git`). A name read as typed is then
-// not the program that runs, so each reading that names a command this hook
-// checks is checked as that command (#135). A bare wildcard (`g?t`) matches
-// files in the working directory, not programs on the PATH, so only one with a
-// `/` is read. A name built from a variable is still not followed.
+// is `git diff`) and matches a word holding a wildcard against the filesystem
+// (`/usr/bin/g?t` is `/usr/bin/git`). A name read as typed is then not the
+// program that runs, so each reading that names a command this hook checks is
+// checked as that command (#135). A bare wildcard (`g?t`) matches files in the
+// working directory, but the word it expands to is then looked up on the PATH
+// like any other: after `touch git`, `g?t push --force` runs /usr/bin/git. So a
+// bare wildcard is read too. A name built from a variable is still not followed.
 const CHECKED_NAMES = [...new Set([...LOOKTHROUGH, 'find', 'watch', 'flock', ...WRAPPERS])];
 // Brace groups multiply. Only the first words of an expansion name the
 // command, so at most this many are kept; a word whose groups make more than
@@ -1559,15 +1560,14 @@ function expandBraces(word) {
 }
 
 /**
- * The checked commands a word holding a `/` and a wildcard in its last part
- * could match (`/usr/bin/g?t` matches git). With `anyPattern` false, a last
- * part of `*`s alone matches none: `cat docs/*` lists a directory, it names no
- * one program.
+ * The checked commands a word holding a wildcard in its last part could match
+ * (`/usr/bin/g?t` and, after `touch git`, `g?t` match git). With `anyPattern`
+ * false, a last part of `*`s alone matches none: `cat docs/*` lists a
+ * directory, it names no one program.
  */
 function globNames(word, anyPattern = true) {
-    const slash = word.lastIndexOf('/');
-    const name = word.slice(slash + 1);
-    if (slash === -1 || !/[*?[]/.test(name) || (!anyPattern && /^\*+$/.test(name))) return [];
+    const name = word.slice(word.lastIndexOf('/') + 1);
+    if (!/[*?[]/.test(name) || (!anyPattern && /^\*+$/.test(name))) return [];
     const re = new RegExp(`^${globToRegExp(name)}$`, 's');
     return CHECKED_NAMES.filter((checked) => re.test(checked));
 }
