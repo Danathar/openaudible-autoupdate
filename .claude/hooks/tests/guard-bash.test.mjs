@@ -295,6 +295,21 @@ const allowed = [
     'whereis sudo',
     // eight checked commands behind one program is the most still read
     `setarch x86_64 ${'git status '.repeat(8)}`,
+    // A command name the shell reads as a checked one passes when that command
+    // would (#135), and braces, wildcards and `$` that build no checked name are
+    // left alone.
+    '/usr/bin/g?t status',
+    'setarch x86_64 /usr/bin/g?t status',
+    'ls /usr/bin/g*',
+    'setarch x86_64 ls /usr/bin/g?t',
+    'cat docs/*',
+    'cat {a,b}.txt',
+    'setarch x86_64 cat {a,b}.txt',
+    'mkdir -p dir/{a..z}',
+    "find . -name '*' -print",
+    "awk -F: '$1 == \"root\" {print $7}' /etc/passwd",
+    "sed 's/\\x67it/git/' docs/strategy.md",
+    'echo {git,} diff --no-index /dev/null .env',
 ];
 
 const blocked = [
@@ -975,6 +990,30 @@ const blocked = [
     ["script -qc 'true;sudo id' /dev/null", '`script` runs a command'],
     // a later tail that passes does not undo an earlier refusal
     ["script -c'sudo id; git status' /dev/null", '`script` runs a command'],
+    // --- a command name the shell reads as a checked one (#135): brace groups
+    // (the empty word dropped), a wildcard in a path, ANSI-C `$'...'` quoting
+    // with its escapes decoded and locale `$"..."` quoting, here and behind a
+    // program this hook does not list ---
+    ['{git,} diff --no-index /dev/null .env', 'reads the command name'],
+    ['setarch x86_64 {git,} diff --no-index /dev/null .env', 'reads the command name'],
+    ['/usr/bin/g?t diff --no-index /dev/null .env', 'reads the command name'],
+    ['setarch x86_64 /usr/bin/g?t diff --no-index /dev/null .env', 'reads the command name'],
+    ["$'git' diff --no-index /dev/null .env", 'reads the command name'],
+    ['$"git" diff --no-index /dev/null .env', 'reads the command name'],
+    ["$'\\x67it' diff --no-index /dev/null .env", 'reads the command name'],
+    ["setarch x86_64 $'\\x67it' diff --no-index /dev/null .env", 'reads the command name'],
+    ["$'\\147it' diff --no-index /dev/null .env", 'reads the command name'],
+    ["$'\\u0067it' diff --no-index /dev/null .env", 'reads the command name'],
+    ['script -qc "$\'git\' diff --no-index /dev/null .env" /dev/null', '`script` runs a command'],
+    ['script -qc "$\'\\x67it\' diff --no-index /dev/null .env" /dev/null', 'reads the command name'],
+    ['{git,diff} --no-index /dev/null .env', 'reads the command name'],
+    ['/usr/bin/[g]it diff --no-index /dev/null .env', 'reads the command name'],
+    ['/usr/bin/g?t push --force origin main', 'force push'],
+    ['timeout 5 /usr/bin/g?t diff --no-index /dev/null .env', 'reads the command name'],
+    ['/usr/bin/s?do id', 'privilege escalation'],
+    ["printf '%s\\n' a | xargs /usr/bin/g?t log", 'xargs'],
+    // a word whose braces make too many forms to read is refused unread
+    ['{{,}{,}{,}{,}{,}{,}{,}{,}{,}{,}{,},git} diff', 'too many to read'],
 ];
 
 for (const command of allowed) {

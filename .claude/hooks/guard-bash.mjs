@@ -106,10 +106,13 @@
 // `prlimit`, `strace -o log`, `script -qc '...'`), each later word naming a
 // command this hook checks, and each command string a word carries, is checked
 // as though it stood alone; the updater named there is not, since `less FILE`
-// and a program that runs FILE look alike. Wrapper options are read as getopt reads them, so a
-// packed (`env -iu X`) or abbreviated (`env --uns X`) option's value is not
-// taken for the command. Deliberate obfuscation (variables, built strings,
-// scripts written then run) stays out of scope.
+// and a program that runs FILE look alike. A command name is read as the shell
+// reads it before looking it up, so `{git,}`, `$'\x67it'`, `$"git"` and
+// `/usr/bin/g?t` are checked as git, here or behind any program. Wrapper
+// options are read as getopt reads them, so a packed (`env -iu X`) or
+// abbreviated (`env --uns X`) option's value is not taken for the command.
+// Deliberate obfuscation (variables, built strings, scripts written then run)
+// stays out of scope.
 //
 // Read-only gh commands (view, list, status, diff, checks, api GET, ...) are
 // always allowed. The command is split into segments on && || ; | & newlines,
@@ -1449,6 +1452,155 @@ function* commandStrings(word) {
     }
 }
 
+// Bash reads a command word before it looks the program up: it decodes
+// `$'...'` escapes (`$'\x67it'` is `git`), drops quotes and backslashes,
+// expands brace groups (`{git,}` is `git`, the empty word dropped; `{git,diff}`
+// is `git diff`) and matches a word holding a `/` and a wildcard against the
+// filesystem (`/usr/bin/g?t` is `/usr/bin/git`). A name read as typed is then
+// not the program that runs, so each reading that names a command this hook
+// checks is checked as that command (#135). A bare wildcard (`g?t`) matches
+// files in the working directory, not programs on the PATH, so only one with a
+// `/` is read. A name built from a variable is still not followed.
+const CHECKED_NAMES = [...new Set([...LOOKTHROUGH, 'find', 'watch', 'flock', ...WRAPPERS])];
+// Brace groups multiply. Only the first words of an expansion name the
+// command, so at most this many are kept; a word whose groups make more than
+// MAX_BRACE_LEAVES forms, empty ones included, is refused unread.
+const MAX_BRACE_FORMS = 32;
+const MAX_BRACE_LEAVES = 1024;
+
+/** Whether this word names a command checkSegment() checks, looks through or refuses. */
+function isCheckedName(a) {
+    return namesCheckedCommand(a) || WRAPPERS.has(basename(a));
+}
+
+/**
+ * The text with `$` removed and `$'...'` escapes decoded as bash decodes them:
+ * `\xHH`, `\uHHHH`, `\UHHHHHHHH`, `\NNN` (octal), `\cX` and the one-letter
+ * escapes. The tokenizer has already dropped the quotes, so the escapes of any
+ * word holding a `$` are decoded; that can only refuse more.
+ */
+function ansiC(text) {
+    const LETTERS = { a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v' };
+    return text.replace(/\$/g, '').replace(
+        /\\(?:x([0-9a-fA-F]{1,2})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8})|([0-7]{1,3})|c(.)|(.))/gs,
+        (all, hex, u4, u8, octal, control, other) => {
+            const code = hex ?? u4 ?? u8;
+            if (code !== undefined) {
+                const n = parseInt(code, 16);
+                return n <= 0x10ffff ? String.fromCodePoint(n) : '';
+            }
+            if (octal !== undefined) return String.fromCharCode(parseInt(octal, 8) & 0xff);
+            if (control !== undefined) return String.fromCharCode(control.charCodeAt(0) & 0x1f);
+            return LETTERS[other] ?? other;
+        }
+    );
+}
+
+/** The words of a `{X..Y[..STEP]}` sequence body, at most MAX_BRACE_FORMS + 1 of them, or null if it is none. */
+function braceSequence(body) {
+    const m = /^(-?\d+|[A-Za-z])\.\.(-?\d+|[A-Za-z])(?:\.\.(-?\d+))?$/.exec(body);
+    if (!m || /\d/.test(m[1]) !== /\d/.test(m[2])) return null;
+    const numeric = /\d/.test(m[1]);
+    const from = numeric ? Number(m[1]) : m[1].charCodeAt(0);
+    const to = numeric ? Number(m[2]) : m[2].charCodeAt(0);
+    const step = (from <= to ? 1 : -1) * (Math.abs(Number(m[3] ?? 1)) || 1);
+    const words = [];
+    for (let v = from; (from <= to ? v <= to : v >= to) && words.length <= MAX_BRACE_FORMS; v += step) {
+        words.push(numeric ? String(v) : String.fromCharCode(v));
+    }
+    return words;
+}
+
+/**
+ * The words bash's brace expansion makes of this word, in order and with empty
+ * ones dropped: at most MAX_BRACE_FORMS of them, or null when the groups make
+ * more than MAX_BRACE_LEAVES forms. A `{` with no matching `}`, or whose group
+ * holds neither a top-level `,` nor a sequence, is a literal, as in bash.
+ */
+function expandBraces(word) {
+    const words = [];
+    let leaves = 0;
+    // false once the expansion is cut short: enough words, or too many forms.
+    const walk = (w) => {
+        spend();
+        for (let open = w.indexOf('{'); open !== -1; open = w.indexOf('{', open + 1)) {
+            let depth = 0;
+            let close = -1;
+            const cuts = [];
+            for (let j = open; j < w.length && close === -1; j++) {
+                if (w[j] === '{') depth++;
+                else if (w[j] === '}' && --depth === 0) close = j;
+                else if (w[j] === ',' && depth === 1) cuts.push(j);
+            }
+            if (close === -1) continue;
+            let alternatives = null;
+            if (cuts.length) {
+                alternatives = [];
+                let from = open + 1;
+                for (const cut of [...cuts, close]) {
+                    alternatives.push(w.slice(from, cut));
+                    from = cut + 1;
+                }
+            } else {
+                alternatives = braceSequence(w.slice(open + 1, close));
+            }
+            if (!alternatives) continue;
+            for (const alternative of alternatives) {
+                if (!walk(w.slice(0, open) + alternative + w.slice(close + 1))) return false;
+            }
+            return true;
+        }
+        if (++leaves > MAX_BRACE_LEAVES) return false;
+        if (w !== '') words.push(w);
+        return words.length < MAX_BRACE_FORMS;
+    };
+    walk(word);
+    return leaves > MAX_BRACE_LEAVES ? null : words;
+}
+
+/**
+ * The checked commands a word holding a `/` and a wildcard in its last part
+ * could match (`/usr/bin/g?t` matches git). With `anyPattern` false, a last
+ * part of `*`s alone matches none: `cat docs/*` lists a directory, it names no
+ * one program.
+ */
+function globNames(word, anyPattern = true) {
+    const slash = word.lastIndexOf('/');
+    const name = word.slice(slash + 1);
+    if (slash === -1 || !/[*?[]/.test(name) || (!anyPattern && /^\*+$/.test(name))) return [];
+    const re = new RegExp(`^${globToRegExp(name)}$`, 's');
+    return CHECKED_NAMES.filter((checked) => re.test(checked));
+}
+
+/**
+ * The command lines the shell could start from this command word, each as the
+ * words that start it, when the word as typed names no checked command and a
+ * reading of it does: `$'\x67it'` and `{git,}` read as `git`, `{git,diff}` as
+ * `git diff`, `/usr/bin/g?t` as `git`. Empty when no reading names one; null
+ * when the word's braces make too many forms to read. `anyPattern` is passed
+ * to globNames().
+ */
+function shellReadings(word, anyPattern = true) {
+    if (!/[$"'\\{}*?[]/.test(word) || isCheckedName(word)) return [];
+    const texts = new Set([unquoted(word)]);
+    if (word.includes('$')) texts.add(unquoted(ansiC(word)));
+    const readings = [];
+    for (const text of texts) {
+        const words = expandBraces(text);
+        if (words === null) return null;
+        if (!words.length || /\s/.test(words[0])) continue;
+        if (isCheckedName(words[0])) readings.push(words);
+        else for (const name of globNames(words[0], anyPattern)) readings.push([name, ...words.slice(1)]);
+    }
+    return readings;
+}
+
+/** Whether the shell could read this word, typed later on a line, as a checked command (see shellReadings()). */
+function readsAsCheckedCommand(word) {
+    const readings = shellReadings(word, false);
+    return readings === null || readings.length > 0;
+}
+
 /**
  * For a segment whose command is a program this hook neither checks nor steps
  * over (`setarch x86_64 git push ...`, `prlimit ...`, `script -qc '...'`), the
@@ -1469,7 +1621,7 @@ function checkUnlistedProgram(w, inlineEnv, state) {
     for (let n = 1; n < w.length; n++) {
         spend();
         let refusal = null;
-        if (namesCheckedCommand(w[n]) || namesCheckedCommand(unquoted(w[n]))) {
+        if (namesCheckedCommand(w[n]) || namesCheckedCommand(unquoted(w[n])) || readsAsCheckedCommand(w[n])) {
             if (++checked > MAX_UNLISTED_INNER) {
                 return block(
                     `Blocked: more than ${MAX_UNLISTED_INNER} commands this hook checks behind \`${basename(cmd)}\`, ` +
@@ -1483,8 +1635,10 @@ function checkUnlistedProgram(w, inlineEnv, state) {
         if (!refusal) {
             for (const text of commandStrings(w[n])) {
                 spend();
-                const names = (t) => t.split(COMMAND_STRING_SEPARATORS).some((piece) => piece && namesCheckedCommand(piece));
-                if (!names(text) && !names(unquoted(text))) continue;
+                const names = (t) =>
+                    t.split(COMMAND_STRING_SEPARATORS)
+                        .some((piece) => piece && (namesCheckedCommand(piece) || readsAsCheckedCommand(piece)));
+                if (!names(text) && !names(unquoted(text)) && !names(unquoted(ansiC(text)))) continue;
                 refusal = checkCommand(text, Object.create(state));
                 if (refusal) break;
             }
@@ -1521,6 +1675,32 @@ function checkSegment(words, state) {
             w.shift();
         }
         if (!w.length) return null;
+        // A command word the shell reads as a checked command (`{git,}`,
+        // `$'\x67it'`, `/usr/bin/g?t`) is checked as that command too; see
+        // shellReadings(). The word as typed is still read below, as before.
+        const readings = shellReadings(w[0]);
+        if (readings === null) {
+            return block(
+                `Blocked: \`${w[0]}\` is a command name whose brace groups make more than ${MAX_BRACE_LEAVES} forms, ` +
+                    'too many to read. Spell the command name out.'
+            );
+        }
+        for (const head of readings) {
+            const env = Object.entries(inlineEnv).map(([name, value]) => `${name}=${value}`);
+            const again = Object.assign([...env, ...(xargsFed ? ['xargs'] : []), ...head, ...w.slice(1)], {
+                pipedFrom,
+                stdinFrom,
+                hereString,
+                heredocBody,
+            });
+            const r = checkSegment(again, state);
+            if (r) {
+                return {
+                    ...r,
+                    reason: `The shell reads the command name \`${w[0]}\` as \`${head.join(' ')}\`, so it is checked as that command. ${r.reason}`,
+                };
+            }
+        }
         const cmd = basename(w[0]);
         if (PRIVILEGE.has(cmd)) {
             return block(`Blocked: \`${cmd}\` (privilege escalation) is never run by agents in this repository.`);
