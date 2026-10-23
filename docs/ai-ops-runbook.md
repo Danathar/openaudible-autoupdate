@@ -81,7 +81,7 @@ permanently, delete the file in a pull request.
 | `claude.yml` | `Claude` | an `@claude` comment (issue, PR conversation or PR review comment) from the owner, a member or a collaborator; refuses fork PRs; without `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` it writes a summary and skips |
 | `labeler.yml` | `Labeler` | labels pull requests by changed paths using [`.github/labeler.yml`](../.github/labeler.yml); skipped for fork PRs |
 | `policy-check.yml` | `Policy check` | runs `scripts/check-policies.mjs` over `policies/` and `risk-config.json`, then its tests; pull requests and pushes to `main` |
-| `agent-tooling.yml` | `Agent tooling` | `node --test` over `scripts/tests/*.test.mjs` and `.claude/hooks/tests/*.test.mjs`; pull requests and pushes to `main` that touch `.claude/**`, `scripts/**` or the workflow itself |
+| `agent-tooling.yml` | `Agent tooling` | `node --test` over `scripts/tests/*.test.mjs` and `.claude/hooks/tests/*.test.mjs`; every pull request and push to `main` (required check `agent-tooling`) |
 
 These are the workflows in the pull requests listed in
 [`agent-tasks/2026-10-10.md`](agent-tasks/2026-10-10.md); they exist on `main`

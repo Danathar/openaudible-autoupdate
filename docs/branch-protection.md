@@ -65,7 +65,7 @@ import format, so it applies as-is.
   arrives as a pull request that passed the required checks. It does not make
   the merger a person: a token that can write contents could merge a green
   pull request through the API.
-- **Six required checks**, all GitHub Actions (`integration_id` 15368):
+- **Seven required checks**, all GitHub Actions (`integration_id` 15368):
   - `Lint (shellcheck)`, `Unit tests (ubuntu bash)`,
     `Unit tests (fedora container)` and `E2E (fedora container)`: the jobs in
     [`ci.yml`](../.github/workflows/ci.yml).
@@ -76,8 +76,12 @@ import format, so it applies as-is.
     `scripts/check-policies.mjs` (including the check that the sha256
     comparison stays ahead of `dnf install`). It was added on 2026-10-10, after
     the workflow reached `main` in #55.
+  - `agent-tooling`: the job in
+    [`agent-tooling.yml`](../.github/workflows/agent-tooling.yml), which runs
+    the tests of the Bash guard hook (`.claude/hooks/tests/`) and of the
+    helper scripts (`scripts/tests/`).
 
-  All three workflows run on every pull request to `main` with no path
+  All four workflows run on every pull request to `main` with no path
   filter, so no pull request waits for a check that never starts. Renaming a
   job (its `name:`), or adding a path filter, blocks every merge until this
   file and the live ruleset are updated to match; see "Renaming a required
@@ -93,7 +97,7 @@ and this one is under a personal account, so the ruleset has no `merge_queue`
 rule. The same guarantee comes from two pieces together:
 
 1. The up-to-date rule above: every pull request carries `main`'s current head
-   and has passed the six checks on it.
+   and has passed the seven checks on it.
 2. Hive's serialized merge lane (`merge_strategy: hive-serialized`): Hive merges
    one pull request at a time and re-validates the next one against the new
    `main`, so two agent pull requests that pass on their own cannot break

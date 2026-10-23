@@ -123,12 +123,13 @@ reading and settled by the owner.
 
 No agent merges its own pull request unless the owner has set that up.
 
-- **Required checks.** Ruleset `protect main` (id 24826574, active) requires six
+- **Required checks.** Ruleset `protect main` (id 24826574, active) requires seven
   checks: `Lint (shellcheck)`, `Unit tests (ubuntu bash)`,
   `Unit tests (fedora container)` and `E2E (fedora container)` (the jobs in
   [`ci.yml`](../.github/workflows/ci.yml)), `Coverage gate`
   ([`coverage-gate.yml`](../.github/workflows/coverage-gate.yml)) and
-  `policy-check` ([`policy-check.yml`](../.github/workflows/policy-check.yml)),
+  `policy-check` ([`policy-check.yml`](../.github/workflows/policy-check.yml))
+  and `agent-tooling` ([`agent-tooling.yml`](../.github/workflows/agent-tooling.yml)),
   with branches required to be up to date. All run on every pull request; a red one blocks the
   merge. The ruleset is recorded in `.github/rulesets/main.json` and explained in
   [`branch-protection.md`](branch-protection.md) (issue #42, PR #58); if either

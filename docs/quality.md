@@ -29,12 +29,13 @@ not run on `main` yet.
 
 ## Required checks
 
-The ruleset on `main` requires six status checks: `Lint (shellcheck)`,
+The ruleset on `main` requires seven status checks: `Lint (shellcheck)`,
 `Unit tests (ubuntu bash)`, `Unit tests (fedora container)`,
-`E2E (fedora container)`, `Coverage gate` and `policy-check`. They come from
-`ci.yml` (the first four), `coverage-gate.yml` and `policy-check.yml`. Read on 2026-10-10 with
-`gh api repos/Danathar/openaudible-autoupdate/rulesets/24826574`, which
-printed those six contexts; #58 records the ruleset as
+`E2E (fedora container)`, `Coverage gate`, `policy-check` and `agent-tooling`.
+They come from `ci.yml` (the first four), `coverage-gate.yml`,
+`policy-check.yml` and `agent-tooling.yml`. The first six were read on
+2026-10-10 with `gh api repos/Danathar/openaudible-autoupdate/rulesets/24826574`,
+which printed those six contexts; #58 records the ruleset as
 `.github/rulesets/main.json`. The strict
 setting means a PR must also be up to date with `main`. PR metrics is not
 required.
