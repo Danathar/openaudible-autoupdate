@@ -131,6 +131,9 @@ const allowed = [
     'git push -u origin acmm/claude-guard',
     'git -C ../wt push origin main',
     'git fetch upstream',
+    // -u is --update-head-ok on fetch, and --exit-code is not --exec
+    'git fetch -u origin main',
+    'git ls-remote --exit-code origin main',
     'git remote set-url --push upstream DISABLE',
     'git status && git diff --stat',
     'shellcheck openaudible-autoupdate.sh',
@@ -358,6 +361,15 @@ const blocked = [
     ['git -c core.pager=./x.sh log', 'core.pager'],
     ['git -c alias.l=!./x.sh l', 'alias.l'],
     ['git --exec-path=/tmp/x log', '--exec-path'],
+    // git fetch|pull|clone|ls-remote|archive options that run the program they name
+    ['git fetch --upload-pack x ../src', 'runs the program'],
+    ['git fetch --upload-pack=x', 'runs the program'],
+    ['git fetch --upl=x ../src', 'runs the program'],
+    ['git pull --upload-pack=x', 'runs the program'],
+    ['git clone -u x ../src dst', 'runs the program'],
+    ['git ls-remote --exec=x .', 'runs the program'],
+    ['git archive --remote=. --exec=x HEAD', 'runs the program'],
+    ['git -c protocol.ext.allow=always fetch ext::sh', 'run a program'],
     ['GIT_EXTERNAL_DIFF=./x.sh git diff HEAD~1 HEAD', 'GIT_EXTERNAL_DIFF'],
     ['env GIT_EXTERNAL_DIFF=./x.sh git diff HEAD~1 HEAD', 'GIT_EXTERNAL_DIFF'],
     ['export GIT_EXTERNAL_DIFF=./x.sh; git diff HEAD~1 HEAD', 'GIT_EXTERNAL_DIFF'],
@@ -1003,19 +1015,26 @@ const blocked = [
     // --- a command name the shell reads as a checked one (#135): brace groups
     // (the empty word dropped), a wildcard in a path, ANSI-C `$'...'` quoting
     // with its escapes decoded and locale `$"..."` quoting, here and behind a
-    // program this hook does not list ---
+    // program this hook does not list. The shared tokenizer decodes `$'...'`
+    // and `$"..."` as it splits the words, so those are refused as the git
+    // command they spell. ---
     ['{git,} diff --no-index /dev/null .env', 'reads the command name'],
     ['setarch x86_64 {git,} diff --no-index /dev/null .env', 'reads the command name'],
     ['/usr/bin/g?t diff --no-index /dev/null .env', 'reads the command name'],
     ['setarch x86_64 /usr/bin/g?t diff --no-index /dev/null .env', 'reads the command name'],
-    ["$'git' diff --no-index /dev/null .env", 'reads the command name'],
-    ['$"git" diff --no-index /dev/null .env', 'reads the command name'],
-    ["$'\\x67it' diff --no-index /dev/null .env", 'reads the command name'],
-    ["setarch x86_64 $'\\x67it' diff --no-index /dev/null .env", 'reads the command name'],
-    ["$'\\147it' diff --no-index /dev/null .env", 'reads the command name'],
-    ["$'\\u0067it' diff --no-index /dev/null .env", 'reads the command name'],
+    ["$'git' diff --no-index /dev/null .env", '--no-index'],
+    ['$"git" diff --no-index /dev/null .env', '--no-index'],
+    ["$'\\x67it' diff --no-index /dev/null .env", '--no-index'],
+    ["setarch x86_64 $'\\x67it' diff --no-index /dev/null .env", '`setarch` runs a command'],
+    ["$'\\147it' diff --no-index /dev/null .env", '--no-index'],
+    ["$'\\u0067it' diff --no-index /dev/null .env", '--no-index'],
     ['script -qc "$\'git\' diff --no-index /dev/null .env" /dev/null', '`script` runs a command'],
-    ['script -qc "$\'\\x67it\' diff --no-index /dev/null .env" /dev/null', 'reads the command name'],
+    ['script -qc "$\'\\x67it\' diff --no-index /dev/null .env" /dev/null', '`script` runs a command'],
+    // brace groups that can build a checked command in any of their forms are
+    // refused even when the first form passes, as the shared reader reads them
+    ['{git,} status', 'brace groups'],
+    ['{x,git} push --force origin main', 'brace groups'],
+    ['/usr/{bin,sbin}/git status', 'brace groups'],
     ['{git,diff} --no-index /dev/null .env', 'reads the command name'],
     ['/usr/bin/[g]it diff --no-index /dev/null .env', 'reads the command name'],
     ['/usr/bin/g?t push --force origin main', 'force push'],
