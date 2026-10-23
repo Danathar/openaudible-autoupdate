@@ -48,7 +48,7 @@ Licence: GPL-3.0-only (see `LICENSE`). Default branch: `main`.
 | `tests/e2e/` | Container end-to-end test: `run.sh` (host side), `in-container.sh` |
 | `.shellcheckrc`, `.coverage-thresholds.json` | Lint config; coverage floor |
 | `scripts/coverage-gate.mjs` | Coverage gate used by `.github/workflows/coverage-gate.yml` |
-| `.github/workflows/ci.yml` | CI. Six required checks (ruleset 24826574, see `docs/branch-protection.md`): `Lint (shellcheck)`, `Unit tests (ubuntu bash)`, `Unit tests (fedora container)`, `E2E (fedora container)` (these four from `ci.yml`), `Coverage gate` (`coverage-gate.yml`) and `policy-check` (`policy-check.yml`) |
+| `.github/workflows/ci.yml` | CI. Seven required checks (ruleset 24826574, see `docs/branch-protection.md`): `Lint (shellcheck)`, `Unit tests (ubuntu bash)`, `Unit tests (fedora container)`, `E2E (fedora container)` (these four from `ci.yml`), `Coverage gate` (`coverage-gate.yml`), `policy-check` (`policy-check.yml`) and `agent-tooling` (`agent-tooling.yml`) |
 
 ## Hard rules
 
