@@ -1000,8 +1000,7 @@ function mayNameScript(word) {
     const name = w.slice(w.lastIndexOf('/') + 1);
     if (name.includes('$')) return true;
     if (!/[*?[]/.test(name)) return false;
-    const re = new RegExp(`^${globToRegExp(name)}$`, 's');
-    return re.test(`${SCRIPT}.sh`) || re.test(SCRIPT);
+    return globMatch(name, `${SCRIPT}.sh`) || globMatch(name, SCRIPT);
 }
 
 /**
@@ -1010,22 +1009,43 @@ function mayNameScript(word) {
  * expression (with `[:class:]` parts and a leading `]` handled) as any one
  * character. An unclosed `[` is a literal, as in the shell.
  */
-function globToRegExp(pattern) {
-    let re = '';
-    for (let i = 0; i < pattern.length; i++) {
-        const c = pattern[i];
-        if (c === '*') {
-            re += '.*';
-        } else if (c === '?') {
-            re += '.';
-        } else if (c === '[' && bracketEnd(pattern, i) !== -1) {
-            re += '.';
-            i = bracketEnd(pattern, i);
+function globMatch(pattern, text) {
+    // Match a pathname pattern against one name in linear time, so an input
+    // cannot blow the hook's time budget (a pattern of many `*` compiled to a
+    // regexp — `.*.*.*…` — backtracks exponentially against a non-matching
+    // name, and that regexp runs inside a single `.test()` call that the
+    // per-step budget check can never interrupt, so the hook runs past its
+    // timeout and Claude Code then runs the command unchecked). This is the
+    // classic single-star-pointer algorithm: `*` matches any run, `?` and a
+    // bracket expression match one character, every other character is literal,
+    // and an unclosed `[` is literal — the same semantics the old regexp gave.
+    let p = 0;
+    let t = 0;
+    let star = -1;
+    let afterStar = 0;
+    const consumesOne = (i) =>
+        pattern[i] === '?' || (pattern[i] === '[' && bracketEnd(pattern, i) !== -1);
+    while (t < text.length) {
+        if (p < pattern.length && consumesOne(p)) {
+            p = pattern[p] === '[' ? bracketEnd(pattern, p) + 1 : p + 1;
+            t++;
+        } else if (p < pattern.length && pattern[p] === '*') {
+            star = p;
+            afterStar = t;
+            p++;
+        } else if (p < pattern.length && pattern[p] === text[t]) {
+            p++;
+            t++;
+        } else if (star !== -1) {
+            p = star + 1;
+            afterStar++;
+            t = afterStar;
         } else {
-            re += c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            return false;
         }
     }
-    return re;
+    while (pattern[p] === '*') p++;
+    return p === pattern.length;
 }
 
 /** Index of the `]` closing the bracket expression opened at `start`, or -1. */
@@ -1568,8 +1588,7 @@ function expandBraces(word) {
 function globNames(word, anyPattern = true) {
     const name = word.slice(word.lastIndexOf('/') + 1);
     if (!/[*?[]/.test(name) || (!anyPattern && /^\*+$/.test(name))) return [];
-    const re = new RegExp(`^${globToRegExp(name)}$`, 's');
-    return CHECKED_NAMES.filter((checked) => re.test(checked));
+    return CHECKED_NAMES.filter((checked) => globMatch(name, checked));
 }
 
 /**
