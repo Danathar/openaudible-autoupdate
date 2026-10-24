@@ -51,6 +51,9 @@ function run(command, toolName = 'Bash') {
 const allowed = [
     // a backslash-quoted heredoc delimiter keeps its body literal
     'cat <<\\EOF\n$(sudo ls)\nEOF',
+    // and so does a `$'...'` one, decoded the way bash decodes it (#150)
+    "cat <<$'EOF'\n$(sudo ls)\nEOF",
+    "cat <<-$'EOF'\n\t$(sudo ls)\n\tEOF",
     // --- node --test and read-only git: the forms .claude/settings.json pre-approves ---
     'node --test scripts/tests/',
     'node --test .claude/hooks/tests/',
@@ -480,6 +483,11 @@ const blocked = [
     ['cat <<\\EOF\nx\nEOF\nsudo ls', 'privilege'],
     ['cat <<E\\OF\nx\nEOF\nsudo ls', 'privilege'],
     ['cat <<-\\EOF\n\tx\n\tEOF\nsudo ls', 'privilege'],
+    // a `$'...'` heredoc delimiter is decoded, and `\'` does not end it: `<<$'\''`
+    // is the delimiter `'`, so the rest of the line is a command bash runs (#150)
+    ["cat <<$'\\'' ; git push --force origin main", 'force'],
+    ["cat <<-$'\\'' ; git push --force origin main", 'force'],
+    ["cat <<$'\\x45OF'\nx\nEOF\nsudo ls", 'privilege'],
     ['cat <<\\EOF\nx\nEOF\n./openaudible-autoupdate.sh', 'would execute'],
     // with no command, distrobox-host-exec runs the host shell on its stdin
     ['distrobox-host-exec', 'no command'],
