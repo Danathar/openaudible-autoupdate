@@ -11,6 +11,11 @@
 # ruleset (docs/branch-protection.md), and a required check must report on
 # every pull request, or a pull request that does not touch these paths waits
 # for it forever. Renaming the job blocks every merge until the ruleset matches.
+#
+# The `mutation` job is advisory and never a required check: on a pull request
+# it mutates the changed lines of .claude/hooks/*.mjs and scripts/*.mjs with a
+# pinned StrykerJS installed outside the checkout (the repository keeps no
+# package.json) and lists every mutant no test notices. See docs/quality.md.
 name: Agent tooling
 
 on:
@@ -52,3 +57,29 @@ jobs:
           printf 'Running %s test file(s):\n' "${#files[@]}"
           printf '  %s\n' "${files[@]}"
           node --test "${files[@]}"
+
+  mutation:
+    name: Mutation check on changed lines (advisory)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Install Stryker (pinned, not saved)
+        run: npm install --prefix "$RUNNER_TEMP/stryker" --no-save --ignore-scripts --no-audit --no-fund @stryker-mutator/core@10.0.0
+
+      - name: Mutate changed lines
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: node scripts/mutation-check.mjs --base "origin/$BASE_REF" --stryker "$RUNNER_TEMP/stryker/node_modules/.bin/stryker"
