@@ -9,3 +9,7 @@ coverage/
 
 # Scratch sandbox for the test-against-fake-manifest skill
 tests/.fake-host/
+
+# Mutation check (scripts/mutation-check.mjs) report and Stryker sandbox.
+reports/mutation/
+.stryker-tmp/

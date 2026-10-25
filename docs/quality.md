@@ -26,6 +26,7 @@ not run on `main` yet.
 | agent audit | [`.github/workflows/agent-audit.yml`](../.github/workflows/agent-audit.yml), `scripts/ai-audit-report.mjs` | weekly: each merged agent PR has a linked issue, the signature line, an acceptable merger and base `main`; a violation fails the run | no, scheduled |
 | auto issues | [`.github/workflows/auto-issues.yml`](../.github/workflows/auto-issues.yml) | opens an issue for a red `main` | no, notification |
 | PR metrics | [`.github/workflows/pr-metrics.yml`](../.github/workflows/pr-metrics.yml), definitions in [metrics.md](metrics.md), readings in [metrics/](metrics/README.md) (this PR, #53) | acceptance rate and time to merge, by author class | no, report only |
+| mutation check on changed lines | `scripts/mutation-check.mjs`, [`stryker.config.mjs`](../stryker.config.mjs), [`.mutation-survivors.json`](../.mutation-survivors.json); see [below](#mutation-check-on-changed-lines) | a changed line of the guard hook, its shared reader or a `scripts/*.mjs` script can be broken without any test failing | no, advisory |
 
 ## Required checks
 
@@ -59,6 +60,41 @@ it is advisory and not guaranteed to be available.
 picture. The property that matters most for this script, the
 [checksum-before-install invariant](review-rubric.md#2-the-checksum-before-install-invariant),
 is guarded by the tests of the mismatch path and by review, not by a metric.
+
+## Mutation check on changed lines
+
+Guard-hook changes here kept merging with every test green while some of their changed lines could be
+broken without any test noticing; each time a later hand mutation audit found them and a test-only pull
+request pinned them (#110, #113, #119, #123, #132). The reader is also copied byte-identical from other
+repositories, so an unpinned line here is unpinned everywhere. `scripts/mutation-check.mjs` does that audit
+for the lines a pull request changes (#155).
+
+- **What it mutates:** only the added and changed lines (`git diff -U0 <base>...HEAD`) of
+  `.claude/hooks/*.mjs` and `scripts/*.mjs`. Tests are never mutated.
+- **Which tests it runs:** [StrykerJS](https://stryker-mutator.io/) `@stryker-mutator/core` 10.0.0 with its
+  built-in `command` test runner, so the tests stay plain `node --test` files. Hook files run against
+  `node --test .claude/hooks/tests/guard-bash.test.mjs .claude/hooks/tests/gate-refusal-corpus.test.mjs`; a
+  script `scripts/<name>.mjs` runs against `scripts/tests/<name>.test.mjs`, and a changed script without one
+  is reported. `.claude/hooks/tests/shell-reader.test.mjs` is never in a command: it pins the reader's
+  sha256, so it fails for every mutant and would count each one as killed.
+- **No dependency:** Stryker is installed with `npm install --prefix <dir> --no-save --ignore-scripts
+  @stryker-mutator/core@10.0.0`, outside the checkout; the repository has no `package.json`.
+  `scripts/mutation-check.mjs` is dependency-free and `stryker.config.mjs` holds the Stryker settings.
+- **Result:** exit 0 means no new survivor, 1 a new survivor (each listed with a ready-to-fill ledger entry,
+  and in the step summary under GitHub Actions), 2 the check could not run. A full guard test run is about
+  30 s and runs once per mutant.
+- **In CI:** the advisory `Mutation check on changed lines (advisory)` job that runs it on each pull request
+  is a workflow change tracked in #155; until it lands, run the check by hand. It is meant to be
+  `continue-on-error`, pull requests only, and never a required check.
+- **What to do with a survivor:** add a test that fails on it. If it is equivalent (behaves the same) or
+  harmless over-refusal (the guard refuses more, never less), add the printed entry to
+  `.mutation-survivors.json` with a real reason. Entries match on file, mutator, original and replacement
+  text, not on line numbers, so they survive edits elsewhere in the file. A survivor that lets the guard
+  allow a command it should refuse is never accepted.
+- **By hand:** install Stryker as above into a temporary directory, then
+  `node scripts/mutation-check.mjs --base origin/main --stryker <dir>/node_modules/.bin/stryker`.
+  `--dry-run` prints the Stryker runs without starting them; `--report <file>` checks existing Stryker JSON
+  reports against the ledger.
 
 ## Where to look
 
