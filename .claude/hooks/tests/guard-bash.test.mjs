@@ -1084,6 +1084,13 @@ const blocked = [
     ['setarch x86_64 g?t push --force', 'reads the command name'],
     ["sh -c 'g?t push --force'", 'force push'],
     ['su?o id', 'privilege escalation'],
+    // the shell drops a backslash-newline inside an extglob group before it
+    // reads the word, so a group split that way still names the program ---
+    ["bash -O extglob -c '/usr/bin/g@\\\n(i)t push --force origin main'", 'force push'],
+    ["bash -O extglob -c 'g@\\\n(i)t push --force origin main'", 'force push'],
+    ["bash -c 'shopt -s extglob\n/usr/bin/g@\\\n(i)t push --force origin main'", 'force push'],
+    ["bash -O extglob -c 's@\\\n(u)do id'", 'privilege escalation'],
+    ["bash -O extglob -c 'gh@\\\n() pr merge 1'", 'gh pr merge'],
 ];
 
 for (const command of allowed) {
