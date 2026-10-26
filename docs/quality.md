@@ -81,8 +81,14 @@ for the lines a pull request changes (#155).
   @stryker-mutator/core@10.0.0`, outside the checkout; the repository has no `package.json`.
   `scripts/mutation-check.mjs` is dependency-free and `stryker.config.mjs` holds the Stryker settings.
 - **Result:** exit 0 means no new survivor, 1 a new survivor (each listed with a ready-to-fill ledger entry,
-  and in the step summary under GitHub Actions), 2 the check could not run. A full guard test run is about
-  30 s and runs once per mutant.
+  and in the step summary under GitHub Actions) or changed lines the time budget did not reach, 2 the check
+  could not run. A full guard test run is about 30 s and runs once per mutant.
+- **Time budget:** a hook change of about 100 lines has about 300 mutants, which takes longer than the
+  45-minute CI job may run; the first such pull request (#159) was cancelled with no result at all (#161). So a
+  test command's changed lines are split into Stryker runs of about 20 lines (whole `git diff` ranges, never
+  cut: Stryker only mutates code that lies wholly inside one range), and after `--budget-minutes` (default
+  40) the check stops Stryker and the tests it started. The runs it finished are reported as usual; the
+  lines it did not reach are listed as not checked. `--budget-minutes 0` turns the budget off for a hand run.
 - **In CI:** the advisory `Mutation check on changed lines (advisory)` job in
   [`agent-tooling.yml`](../.github/workflows/agent-tooling.yml) runs it on each pull request (#155). It is
   `continue-on-error`, pull requests only, and never a required check.
