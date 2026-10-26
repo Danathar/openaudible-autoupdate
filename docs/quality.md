@@ -91,7 +91,8 @@ for the lines a pull request changes (#155).
   lines it did not reach are listed as not checked. `--budget-minutes 0` turns the budget off for a hand run.
 - **In CI:** the advisory `Mutation check on changed lines (advisory)` job in
   [`agent-tooling.yml`](../.github/workflows/agent-tooling.yml) runs it on each pull request (#155). It is
-  `continue-on-error`, pull requests only, and never a required check.
+  `continue-on-error`, pull requests only, and never a required check. The job may run 120 minutes and passes
+  `--budget-minutes 110`, so the check stops and reports 10 minutes before the job would be cancelled.
 - **What to do with a survivor:** add a test that fails on it. If it is equivalent (behaves the same) or
   harmless over-refusal (the guard refuses more, never less), add the printed entry to
   `.mutation-survivors.json` with a real reason. Entries match on file, mutator, original and replacement
