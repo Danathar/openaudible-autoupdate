@@ -12,7 +12,7 @@ Agents open pull requests against `Danathar/openaudible-autoupdate` only
 
 | Tier | Agent may | Agent may not |
 | ---- | --------- | ------------- |
-| 1 critical | Propose a change in a pull request when the owner asked for it, and run the required commands. | Merge it, change it as part of unrelated work, or edit files that bound agents (`AGENTS.md`, `policies/`, `risk-config.json`, `renovate.json`, `.github/CODEOWNERS`, `.github/workflows/`) at all unless the owner told it to. |
+| 1 critical | Propose a change in a pull request when the owner asked for it, and run the required commands. | Merge it, change it as part of unrelated work, or edit files that bound agents (`AGENTS.md`, `policies/`, `scripts/check-policies.mjs`, `risk-config.json`, `renovate.json`, `.claude/settings.json`, `.claude/hooks/`, `.github/CODEOWNERS`, `.github/rulesets/`, `.github/workflows/`) at all unless the owner told it to. |
 | 2 high | Open a pull request with the required commands run and reported. | Merge it. The owner reads the diff. |
 | 3 medium | Open a pull request; the jobs in `.github/workflows/ci.yml` are the gate. | Skip or loosen a failing check. |
 | 4 low | Open a pull request; CI is the gate. | Use a docs-only change to hide a change to a command users run. |
@@ -61,8 +61,9 @@ enough and the owner reads the diff:
 - `.claude/settings.json` and `.claude/hooks/` (the permission table and the
   Bash guard)
 - `policies/`, `scripts/check-policies.mjs`, `risk-config.json`, `renovate.json`,
-  `.github/CODEOWNERS`, `.github/workflows/`
-- `docs/security/`, `docs/risk-tiers.md`, this file (Tier 2)
+  `.github/CODEOWNERS`, `.github/rulesets/`, `.github/workflows/`
+- `docs/security/`, `docs/risk-tiers.md`, `docs/agent-boundaries.md` (this
+  file) (Tier 2)
 
 `policies/repo-target.json` lists the direction files that must carry
 `--repo Danathar/openaudible-autoupdate`. Add a new one there when you add a

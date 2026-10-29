@@ -244,8 +244,9 @@ Without the owner's explicit, in-conversation instruction, an agent never:
 - changes anything in Tier 1 of [docs/risk-tiers.md](../risk-tiers.md) while
   acting autonomously, changes the install path of the script (also Tier 1), or
   relaxes any file that bounds agents (`AGENTS.md`, `policies/`,
-  `risk-config.json`, `.github/CODEOWNERS`, `.claude/settings.json`,
-  `.claude/hooks/`); see [agent boundaries](../agent-boundaries.md);
+  `scripts/check-policies.mjs`, `risk-config.json`, `renovate.json`,
+  `.github/CODEOWNERS`, `.github/rulesets/`, `.github/workflows/`,
+  `.claude/settings.json`, `.claude/hooks/`); see [agent boundaries](../agent-boundaries.md);
 - weakens checksum verification, adds a gpgcheck bypass, or runs the real
   updater (section 1.1);
 - edits `LICENSE`;
