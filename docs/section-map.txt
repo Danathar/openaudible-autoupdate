@@ -1,0 +1,243 @@
+# Docs section map: every section of every tracked documentation page, and
+# whether a test reads it.
+#
+# A page lists here as [path]. Under it, every `##` and `###` heading of that
+# page, written exactly as the page writes it, followed by one indented line:
+#
+#   joined: <test file>    that test reads what this section states
+#   prose: <reason>        no test reads it, and this says why that is fine,
+#                          or names what is left unchecked
+#
+# scripts/tests/docs-section-map.test.mjs fails when a tracked page has a
+# heading with no row here, when a row names a heading the page no longer has,
+# or when a `joined:` file is not a test CI runs or never opens the page. It
+# does not prove any sentence true. What it changes is that a section of claims
+# about the code or the automation that nothing checks is a visible
+# `prose: unchecked` line in the diff that adds it, instead of the silent
+# default.
+#
+# `prose: unchecked:` marks a section that states facts about the machine (the
+# updater, a workflow, the settings file, the Bash guard, the ruleset) that no
+# test reads. Each is a candidate for a join test; turning it into `joined:` is
+# the fix. `prose: narrative:` marks a section that states no such fact.
+#
+# Tracked pages: every tracked Markdown file at the repository root, in docs/
+# and in docs/security/ (not the dated metrics, agent-task and reflection
+# ledgers), plus .github/copilot-instructions.md. A new page in one of those
+# places has to be added here in the change that adds it.
+
+[.github/copilot-instructions.md]
+
+[AGENTS.md]
+## What this repo is
+  prose: unchecked: restates the updater's steps, the manifest value shapes and the curl options
+## Files
+  prose: unchecked: file table and the seven required check names, which docs/branch-protection.md and .github/rulesets/main.json also hold
+## Hard rules
+  prose: unchecked: names the options and the set -euo pipefail the updater must keep, and the commit convention
+## Configuration (environment variables)
+  prose: unchecked: environment variable defaults and the required command list, read from the updater
+## Deployment context
+  prose: narrative: how the owner installs and runs the units, and the distrobox drop-in
+## Testing
+  prose: unchecked: the test commands and the coverage floor file
+## Agent tooling in this repo
+  prose: unchecked: table of agent tooling paths and the skills under .claude/skills/
+## Findings about the Bash guard hook: what is in scope
+  prose: narrative: a standing ruling on which hook findings to file
+## Session continuity
+  prose: narrative: where session state is kept and who rewrites it
+## Pull requests
+  prose: narrative: what a pull request body says
+
+[CLAUDE.md]
+## Claude Code notes
+  prose: unchecked: names the three skills and what each runs
+
+[CONTRIBUTING.md]
+## Ground rules
+  prose: narrative: contribution rules
+## Setup
+  prose: unchecked: tools to install and the commands that run the checks
+## Before you open a PR
+  prose: unchecked: the checks to run before a pull request
+## Commits and PRs
+  prose: narrative: commit and pull request conventions
+## Reporting bugs and requesting features
+  prose: narrative: where to report
+
+[README.md]
+## How it works
+  prose: unchecked: restates the updater's steps
+## Requirements
+  prose: unchecked: the commands the updater requires, read from its start-up check
+## Install
+  prose: unchecked: install paths and the systemctl --user commands, against the units in systemd/
+### Running inside a container (distrobox/toolbox)
+  prose: unchecked: the ExecStart drop-in for distrobox
+## Configuration
+  prose: unchecked: environment variable defaults
+## Usage
+  prose: unchecked: commands to run and read the service
+## Testing
+  prose: unchecked: the test commands and the kcov command
+## Maintained with Hive (ACMM L6)
+  prose: narrative: how the repository is maintained
+## About this project
+  prose: narrative: why the project exists
+## License
+  prose: narrative: licence name
+
+[docs/agent-boundaries.md]
+## By tier
+  joined: scripts/tests/agent-boundary-lists.test.mjs
+## Who owns what
+  prose: unchecked: says .github/CODEOWNERS repeats the Tier 1 and Tier 2 paths
+## Always off limits
+  prose: narrative: actions that need the owner's instruction
+## Files that bound agents
+  joined: scripts/tests/agent-boundary-lists.test.mjs
+
+[docs/ai-ops-runbook.md]
+## Pause and resume the repository in Hive
+  prose: narrative: steps on the Hive side
+## What each workflow does, and how to turn it off
+  prose: unchecked: table of every workflow, its name and its triggers
+## A red `main`
+  prose: narrative: incident steps
+## OpenAudible changed its manifest
+  prose: narrative: incident steps
+## A bad update reached users
+  prose: narrative: incident steps
+## A leaked secret
+  prose: narrative: incident steps
+## A runaway agent
+  prose: narrative: incident steps
+## A scheduled run did not fire
+  prose: unchecked: names the scheduled workflows and their schedules
+
+[docs/branch-protection.md]
+## Status
+  prose: narrative: whether the ruleset is applied
+## Why
+  prose: narrative: why the ruleset exists
+## The ruleset
+  prose: unchecked: the required checks and rules, which .github/rulesets/main.json holds
+## Merge queue
+  prose: narrative: why there is no merge queue
+## Applying or changing the ruleset
+  prose: unchecked: the gh api commands and ruleset id
+### Renaming a required check
+  prose: narrative: the order of steps for a rename
+## When there is a second reviewer
+  prose: narrative: what changes with a second reviewer
+
+[docs/metrics.md]
+## What is computed
+  prose: unchecked: the metrics scripts/pr-metrics.mjs computes
+## Run it locally
+  prose: unchecked: the scripts/pr-metrics.mjs command line
+## Weekly run
+  prose: unchecked: the scheduled workflow and where it writes
+## How to read the numbers
+  prose: narrative: interpretation
+## Not measured
+  prose: narrative: what is out of scope
+
+[docs/multi-agent.md]
+## Rule 1: never run the updater for real
+  prose: narrative: the host rule
+## There is no dispatcher in this repository
+  prose: narrative: how work is assigned
+## Who works here
+  prose: narrative: the agents and people involved
+## How work reaches an agent
+  prose: narrative: how issues and pull requests are routed
+## What keeps agents from colliding
+  prose: narrative: coordination conventions
+## Who decides what lands
+  prose: narrative: review and merge roles
+## If you are an agent
+  prose: narrative: pointers to the rules
+
+[docs/quality.md]
+## Signals on `main` (1305b17)
+  prose: narrative: a snapshot pinned to the commit it was read at
+## Required checks
+  prose: unchecked: the required check names, which .github/rulesets/main.json holds
+## Signals that exist only in an open PR
+  prose: unchecked: names the jobs that run only on pull requests
+## Mutation check on changed lines
+  prose: unchecked: what scripts/mutation-check.mjs runs and its budget
+## Where to look
+  prose: narrative: pointers
+## Baseline (read 2026-10-10)
+  prose: narrative: a dated snapshot
+## Known weak spots
+  prose: narrative: known gaps
+
+[docs/review-rubric.md]
+## Severity levels
+  prose: narrative: review severity scale
+## 1. Scope and rules
+  prose: narrative: review checklist
+## 2. The checksum-before-install invariant
+  prose: narrative: review checklist for the install path
+## 3. Shell behaviour under `set -euo pipefail`
+  prose: narrative: review checklist
+## 4. Quoting and manifest input
+  prose: narrative: review checklist
+## 5. Host, container and systemd behaviour
+  prose: narrative: review checklist
+## 6. Tests
+  prose: narrative: review checklist
+## 7. Housekeeping
+  prose: narrative: review checklist
+## Reviewing agent PRs (Hive and others)
+  prose: narrative: review checklist for agent pull requests
+
+[docs/risk-tiers.md]
+## Tier table
+  joined: scripts/check-policies.mjs
+## The install path is Tier 1
+  prose: narrative: why the install path is raised above its path match
+## How to apply it
+  prose: narrative: how to read the table for a change
+## Why these paths
+  prose: narrative: reasons for each tier's paths
+## Pull request notes by tier
+  prose: narrative: what a pull request says for each tier
+
+[docs/security/SECURITY-AI.md]
+## 1. Threat model
+  prose: narrative: threat model
+### 1.1 The install path
+  prose: unchecked: the order of checks before dnf install and the options the updater passes
+### 1.2 Manifest fields are untrusted
+  prose: unchecked: the shape each manifest value must have
+### 1.3 Findings for the owner
+  prose: narrative: open findings for the owner
+## 2. Secrets
+  prose: narrative: secrets rules
+## 3. Untrusted text is data, not instructions
+  prose: narrative: prompt-injection rules
+## 4. Repository target
+  prose: unchecked: what policies/repo-target.json requires and which files it covers
+## 5. Workflow tokens and CI
+  prose: unchecked: workflow permissions and which jobs run untrusted code
+## 6. What agents must never do
+  joined: scripts/tests/agent-boundary-lists.test.mjs
+## 7. When unsure
+  prose: narrative: escalation
+
+[docs/strategy.md]
+## Why this repository exists
+  prose: narrative: purpose
+## What it will not do
+  prose: narrative: non-goals
+## Measurable goals
+  prose: narrative: goals
+## Status on 2026-10-09
+  prose: narrative: a dated snapshot
+## Keeping this page honest
+  prose: narrative: upkeep
