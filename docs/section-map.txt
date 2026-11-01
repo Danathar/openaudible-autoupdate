@@ -36,7 +36,7 @@
 ## Hard rules
   prose: unchecked: names the options and the set -euo pipefail the updater must keep, and the commit convention
 ## Configuration (environment variables)
-  prose: unchecked: environment variable defaults and the required command list, read from the updater
+  joined: scripts/tests/updater-config-docs.test.mjs
 ## Deployment context
   prose: narrative: how the owner installs and runs the units, and the distrobox drop-in
 ## Testing
@@ -70,13 +70,13 @@
 ## How it works
   prose: unchecked: restates the updater's steps
 ## Requirements
-  prose: unchecked: the commands the updater requires, read from its start-up check
+  joined: scripts/tests/updater-config-docs.test.mjs
 ## Install
   prose: unchecked: install paths and the systemctl --user commands, against the units in systemd/
 ### Running inside a container (distrobox/toolbox)
   prose: unchecked: the ExecStart drop-in for distrobox
 ## Configuration
-  prose: unchecked: environment variable defaults
+  joined: scripts/tests/updater-config-docs.test.mjs
 ## Usage
   prose: unchecked: commands to run and read the service
 ## Testing
