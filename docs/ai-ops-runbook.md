@@ -64,7 +64,7 @@ gh workflow list --repo Danathar/openaudible-autoupdate --all
 ```
 
 Disabling a required check leaves pull requests waiting for a status that never
-arrives. Disable `CI`, `Coverage gate` or `Policy check` only if you also relax the ruleset
+arrives. Disable `CI`, `Coverage gate`, `Policy check` or `Agent tooling` only if you also relax the ruleset
 ([`branch-protection.md`](branch-protection.md)). To remove a workflow
 permanently, delete the file in a pull request.
 
@@ -72,20 +72,18 @@ permanently, delete the file in a pull request.
 |---|---|---|
 | `ci.yml` | `CI` | jobs `Lint (shellcheck)`, `Unit tests (ubuntu bash)`, `Unit tests (fedora container)`, `E2E (fedora container)`; every pull request and every push to `main` |
 | `coverage-gate.yml` | `Coverage gate` | measures line coverage of the script under the bats tests with kcov in a Fedora container and fails below the floor in `.coverage-thresholds.json`; pull requests and pushes to `main` |
-| `nightly-compliance.yml` | `Nightly compliance` | 04:23 UTC daily and manual: repeats unit, shellcheck and e2e jobs, and runs `Upstream manifest contract` against the live OpenAudible manifest; on failure opens or updates one tracking issue and never closes it |
+| `nightly-compliance.yml` | `Nightly compliance` | 04:23 UTC daily and manual: repeats unit, shellcheck and e2e jobs, and runs job `Upstream manifest contract` against the live OpenAudible manifest; on failure opens or updates one tracking issue and never closes it |
 | `auto-qa.yml` | `Auto-QA` | Mondays 05:17 UTC and manual: measures coverage like the gate, runs `scripts/auto-qa-tuner.mjs` with `.github/auto-qa-tuning.json`, and opens or updates one issue proposing a higher floor; never commits, never lowers a floor |
 | `pr-metrics.yml` | `PR metrics` | Mondays 06:17 UTC and manual: runs `scripts/pr-metrics.mjs`, writes a step summary and a `pr-metrics` artifact; read-only ([`metrics.md`](metrics.md)) |
 | `agent-audit.yml` | `Agent audit trail` | Mondays 05:17 UTC and manual: `scripts/ai-audit-report.mjs --strict` checks agent PRs for a linked issue, a signature line and a human (or Hive lane) merger; a violation turns the run red, nothing is written |
 | `auto-issues.yml` | `Auto issues` | when `CI` completes as failure, timed out or startup failure on a push to `main`, opens or comments on one tracking issue; never closes it |
-| `ai-fix.yml` | `AI fix requested` | on label `ai-fix-requested` (issue or PR) or an `/ai-fix` comment from the owner, a member or a collaborator, asks Claude Code to verify review findings and apply those that hold; skips bots and fork PRs |
+| `ai-fix.yml` | `AI fix requested` | on label `ai-fix-requested` (issue or pull request) or an `/ai-fix` comment from the owner, a member or a collaborator, asks Claude Code to verify review findings and apply those that hold; skips bots and fork PRs |
 | `claude.yml` | `Claude` | an `@claude` comment (issue, PR conversation or PR review comment) from the owner, a member or a collaborator; refuses fork PRs; without `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` it writes a summary and skips |
 | `labeler.yml` | `Labeler` | labels pull requests by changed paths using [`.github/labeler.yml`](../.github/labeler.yml); skipped for fork PRs |
-| `policy-check.yml` | `Policy check` | runs `scripts/check-policies.mjs` over `policies/` and `risk-config.json`, then its tests; pull requests and pushes to `main` |
-| `agent-tooling.yml` | `Agent tooling` | `node --test` over `scripts/tests/*.test.mjs` and `.claude/hooks/tests/*.test.mjs`; every pull request and push to `main` (required check `agent-tooling`) |
+| `policy-check.yml` | `Policy check` | runs `scripts/check-policies.mjs` over `policies/` and `risk-config.json`, then its tests; pull requests and pushes to `main` (required check `policy-check`) |
+| `agent-tooling.yml` | `Agent tooling` | `node --test` over `scripts/tests/*.test.mjs` and `.claude/hooks/tests/*.test.mjs`; every pull request and push to `main` (required check `agent-tooling`); on pull requests only, the advisory job `Mutation check on changed lines (advisory)` mutates the changed lines of `.claude/hooks/*.mjs` and `scripts/*.mjs` ([`quality.md`](quality.md)) |
 
-These are the workflows in the pull requests listed in
-[`agent-tasks/2026-10-10.md`](agent-tasks/2026-10-10.md); they exist on `main`
-only once those merge. A header comment at the top of each file explains its
+A header comment at the top of each file explains its
 triggers and gating; that header, not this table, is the source of truth if they
 differ. Get the exact `name:` with `grep -m1 '^name:' .github/workflows/<file>`.
 

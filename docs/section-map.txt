@@ -102,7 +102,7 @@
 ## Pause and resume the repository in Hive
   prose: narrative: steps on the Hive side
 ## What each workflow does, and how to turn it off
-  prose: unchecked: table of every workflow, its name and its triggers
+  joined: scripts/tests/runbook-workflows-docs.test.mjs
 ## A red `main`
   prose: narrative: incident steps
 ## OpenAudible changed its manifest
@@ -114,7 +114,7 @@
 ## A runaway agent
   prose: narrative: incident steps
 ## A scheduled run did not fire
-  prose: unchecked: names the scheduled workflows and their schedules
+  joined: scripts/tests/runbook-workflows-docs.test.mjs
 
 [docs/branch-protection.md]
 ## Status
