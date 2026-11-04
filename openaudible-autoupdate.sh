@@ -33,7 +33,7 @@ if ! installed_version=$(rpm -q --qf '%{VERSION}' "$PKG_NAME" 2>/dev/null); then
 fi
 
 manifest="$WORKDIR/version.json"
-if ! curl -fsSL --proto =https --proto-redir =https "$VERSION_URL" -o "$manifest"; then
+if ! curl -fsSL --proto =https --proto-redir =https --connect-timeout 30 --max-time 60 "$VERSION_URL" -o "$manifest"; then
   log "Failed to fetch version manifest from $VERSION_URL"
   exit 1
 fi
@@ -85,7 +85,7 @@ fi
 log "Update available: $installed_version -> $latest_version. Downloading $file_name..."
 
 rpm_path="$WORKDIR/$file_name"
-if ! curl -fsSL --proto =https --proto-redir =https "${download_dir}${file_name}" -o "$rpm_path"; then
+if ! curl -fsSL --proto =https --proto-redir =https --connect-timeout 30 --speed-limit 1024 --speed-time 120 "${download_dir}${file_name}" -o "$rpm_path"; then
   log "Download failed for ${download_dir}${file_name}"
   exit 1
 fi

@@ -77,12 +77,14 @@ S
 # a real HTTP 404: with -f (alone or in a cluster such as -fsSL) curl exits 22
 # and writes nothing; without -f it writes the error page and exits 0, so a
 # dropped -f shows up as the script carrying on with an HTML body.
-# --proto/--proto-redir values are recorded so tests can assert them.
-out="" url="" fail=0 protos=""
+# --proto/--proto-redir values are recorded so tests can assert them, and so
+# are the time limits (flags that take a value, so the value is not the URL).
+out="" url="" fail=0 protos="" limits=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out="$2"; shift 2 ;;
     --proto | --proto-redir) protos="$protos $1 $2"; shift 2 ;;
+    --connect-timeout | --max-time | --speed-limit | --speed-time) limits="$limits $1 $2"; shift 2 ;;
     --fail) fail=1; shift ;;
     --*) shift ;;
     -*) [[ "$1" == *f* ]] && fail=1; shift ;;
@@ -90,6 +92,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 echo "curl $url" >>"$STUB_CALLS"
+[ -n "$limits" ] && echo "curl-limits$limits $url" >>"$STUB_CALLS"
 [ -n "$protos" ] && echo "curl-protos$protos $url" >>"$STUB_CALLS"
 src="$STUB_SERVER/$(basename "$url")"
 if [ ! -f "$src" ]; then

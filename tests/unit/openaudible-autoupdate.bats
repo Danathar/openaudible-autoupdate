@@ -286,6 +286,21 @@ assert_rejected_before_download() {
   [[ "$(calls)" == *"curl-protos --proto =https --proto-redir =https $VERSION_URL"* ]]
 }
 
+@test "manifest fetch gives up if the server is slow to connect or goes silent" {
+  publish_release 2.0.0
+  run_script
+  [ "$status" -eq 0 ]
+  [[ "$(calls)" == *"curl-limits --connect-timeout 30 --max-time 60 $VERSION_URL"* ]]
+}
+
+@test "rpm download gives up on a stalled transfer without a total time cap" {
+  publish_release 2.0.0
+  run_script
+  [ "$status" -eq 0 ]
+  [[ "$(calls)" == *"curl-limits --connect-timeout 30 --speed-limit 1024 --speed-time 120 https://stub.test/dl/OpenAudible-2.0.0.x86_64.rpm"* ]]
+  [[ "$(calls)" != *"--max-time 60 https://stub.test/dl/"* ]]
+}
+
 @test "rpm header is checked after the checksum and before sudo dnf" {
   publish_release 2.0.0
   run_script

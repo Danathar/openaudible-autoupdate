@@ -25,7 +25,12 @@ own version manifest and upgrades the installed rpm automatically.
 2. Fetches `https://openaudible.org/downloads/swt_version.json` over https
    only (redirects included), which lists
    the current release version and, per platform, a download URL and
-   `sha256` checksum.
+   `sha256` checksum. Neither download waits forever: the manifest fetch
+   gives up after 30 seconds without a connection or 60 seconds in total, and
+   the rpm download gives up after 30 seconds without a connection or if the
+   transfer stays under 1 KiB/s for 120 seconds, so a slow but moving download
+   still finishes. A failure logs and exits 1, and the next daily run tries
+   again.
 3. Checks the manifest before using it: it must be a JSON object, the version
    must look like an rpm version, the file must be a plain `.rpm` name, the
    `sha256` must be 64 hex characters and `download_dir` must be an
