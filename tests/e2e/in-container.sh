@@ -131,7 +131,9 @@ if [ "$SCRIPT_STATUS" -eq 0 ] && grep -q "is not installed via rpm" "$WORK/out.t
 else fail "not installed case (status $SCRIPT_STATUS)"; fi
 
 step "Installing old version 1.0.0"
-rpm -i "$OLD_RPM"
+# Through dnf, as the updater installs. Plain rpm -i refuses an unsigned package
+# from Fedora 45 on, and this fixture is built unsigned.
+dnf install -y -q "$OLD_RPM" >/dev/null
 assert_installed_version 1.0.0 "precondition"
 
 step "Case 1: checksum mismatch -> exit 1, old version stays"
