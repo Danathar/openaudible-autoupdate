@@ -6,6 +6,8 @@
 # same paragraph (`at <sha>`, or `<sha>:openaudible-autoupdate.sh:<line>`);
 # otherwise name the code itself (a variable, a check, a log message).
 
+load helpers
+
 REPO_ROOT="$BATS_TEST_DIRNAME/../.."
 
 # Prints every Markdown paragraph under $1 that has an unpinned line reference.

@@ -8,6 +8,15 @@
 
 SCRIPT="${BATS_TEST_DIRNAME}/../../openaudible-autoupdate.sh"
 
+# Under kcov the test shell itself runs with xtrace on. From bats 1.14, run()
+# saves its traps in a variable, and the multi-line trace of that assignment
+# leaves kcov 43's quote tracking stuck "inside a string", so it drops the
+# trace lines that follow and coverage reads 14%, not 100%. Only the updater's
+# trace matters here. It runs in a child bash, which still traces through
+# BASH_ENV. Outside kcov xtrace is already off, so this does nothing. Every
+# .bats file must load this file, because all of them share one trace stream.
+set +x
+
 setup_sandbox() {
   SANDBOX="$BATS_TEST_TMPDIR/sandbox"
   STUBS="$SANDBOX/stubs"
