@@ -44,6 +44,11 @@ The marks a change carries, and where to read them:
     --jq '[.closingIssuesReferences[].number]'
   ```
 
+  A Hive-App-authored pull request may instead carry its own body line
+  `Refs #N`, `Refs Danathar/<repo>#N` or `No issue: <reason>`; the weekly
+  audit accepts it and shows "ok (refs #N)" or "ok (no issue stated)" in the
+  Result column. Other agent pull requests still need the closing reference.
+
 - **Hive signature.** Hive PRs end with a line like `— hive: agent=<name>` and
   are opened by `app/danathar-atomic-hive`:
 

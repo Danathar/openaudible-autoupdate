@@ -61,7 +61,7 @@ file's own header is the source of truth. Run the command for today's answer.
 | Tests do not lose coverage | the line-coverage floor for `openaudible-autoupdate.sh` in `.coverage-thresholds.json` (95% when written, measured 100% on 45 lines), enforced by `.github/workflows/coverage-gate.yml` (job `Coverage gate`); a floor guards against regression, it is not a target to climb | `gh run list --repo Danathar/openaudible-autoupdate --workflow coverage-gate.yml --branch main --limit 10 --json createdAt,conclusion` |
 | The script still matches OpenAudible's manifest | the `Upstream manifest contract` job in `.github/workflows/nightly-compliance.yml`, which fetches the live manifest and checks that the fields the script reads are still there; the same workflow repeats the unit, shellcheck and e2e jobs nightly | `gh run list --repo Danathar/openaudible-autoupdate --workflow nightly-compliance.yml --limit 7` |
 | Change flow is visible | PR counts, review findings, CI outcomes, read by `scripts/pr-metrics.mjs` | [`metrics.md`](metrics.md), dated snapshots in [`metrics/`](metrics/) |
-| Agent work is traceable | every agent PR has `Closes #N`, a signature line and a merger that is a human or the Hive serialized lane | [`agent-tasks/`](agent-tasks/README.md), the `agent-audit.yml` run summary |
+| Agent work is traceable | every agent PR has `Closes #N` (Hive-App PRs may use a `Refs #N` or `No issue: <reason>` line), a signature line and a merger that is a human or the Hive serialized lane | [`agent-tasks/`](agent-tasks/README.md), the `agent-audit.yml` run summary |
 
 The fields the script depends on are `.version`, `.download_dir` and
 `.platforms[$PLATFORM_KEY].file` and `.sha256`

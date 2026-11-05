@@ -91,7 +91,9 @@ reading and settled by the owner.
    in your pull request body which files you touch and which open pull requests
    you checked them against.
 2. **One branch per issue.** A pull request answers one issue (or one named
-   group of issues) and says so with `Closes #N`. Branch names say what they do
+   group of issues) and says so with `Closes #N`, or, when it should leave
+   the issue open, a line `Refs #N` (or `Refs Danathar/<repo>#N`); a change with
+   no issue says `No issue: <reason>` on a line of its own. Branch names say what they do
    (Hive names its own branches; do not rely on a pattern); the ACMM effort used
    `acmm/<slug>` (see [`agent-tasks/2026-10-10.md`](agent-tasks/2026-10-10.md)).
    Branch from current `origin/main`; do not stack one branch on another.

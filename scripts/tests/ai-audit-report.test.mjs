@@ -9,8 +9,10 @@ import {
     auditPr,
     buildReport,
     classify,
+    findIssueStatement,
     findSignature,
     hasLinkedIssue,
+    issueLink,
     main,
     parseArgs,
     renderMarkdown,
@@ -335,4 +337,79 @@ test('CLI: without --output the report goes to stdout', () => {
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /^### Agent audit trail/);
     assert.ok(r.stdout.endsWith('\n'));
+});
+
+const noClosing = (body, author = 'app/danathar-atomic-hive') =>
+    pr({ author: { login: author }, body: `${body}\n\n${SIG}`, closingIssuesReferences: [] });
+
+test('a Hive-App PR with a Refs #N line passes and the Result column says so', () => {
+    const p = noClosing('Refs #169');
+    assert.deepEqual(auditPr(p), []);
+    assert.equal(issueLink(p), 'refs #169');
+    assert.match(renderMarkdown(buildReport([p])), /\| ok \(refs #169\) \|/);
+});
+
+test('a Hive-App PR with a Refs Danathar/<repo>#N line passes', () => {
+    const p = noClosing('Refs Danathar/atomic-image-builder#833');
+    assert.deepEqual(auditPr(p), []);
+    assert.match(
+        renderMarkdown(buildReport([p])),
+        /ok \(refs Danathar\/atomic-image-builder#833\)/
+    );
+});
+
+test('a Hive-App PR with a No issue: reason line passes', () => {
+    const p = noClosing('No issue: typo in a comment');
+    assert.deepEqual(auditPr(p), []);
+    assert.match(renderMarkdown(buildReport([p])), /ok \(no issue stated\)/);
+    assert.deepEqual(auditPr(noClosing('No issue:')), ['linked-issue']);
+});
+
+test('a closing reference still passes and shows plain ok', () => {
+    assert.deepEqual(auditPr(pr()), []);
+    assert.equal(issueLink(pr()), 'closes');
+    assert.match(renderMarkdown(buildReport([pr({ body: `Refs #7\n${SIG}` })])), /\| ok \|/);
+});
+
+test('a Hive-App PR with no closing reference and no statement is still flagged', () => {
+    assert.deepEqual(auditPr(noClosing('Just prose.')), ['linked-issue']);
+    assert.match(
+        renderMarkdown(buildReport([noClosing('Just prose.')])),
+        /violates: linked-issue/
+    );
+});
+
+test('Refs and No issue count only as their own line outside code fences', () => {
+    for (const body of [
+        'This work refs #5 in passing.',
+        'See Refs #5 above',
+        'Refs #5 and more',
+        'Refs Other/repo#5',
+        'We say No issue: because prose',
+        '```\nRefs #5\n```',
+        '```\nNo issue: example\n```',
+    ]) {
+        assert.equal(findIssueStatement(body), null, body);
+        assert.deepEqual(auditPr(noClosing(body)), ['linked-issue'], body);
+    }
+    assert.deepEqual(findIssueStatement('x\r\n  Refs #5  \r\n'), { kind: 'refs', ref: '#5' });
+});
+
+test('a non-Hive agent PR with only a Refs line is still flagged', () => {
+    const human = pr({
+        author: { login: 'Danathar', is_bot: false },
+        body: `Refs #5\n${SIG}`,
+        closingIssuesReferences: [],
+    });
+    assert.deepEqual(auditPr(human), ['linked-issue']);
+    const noIssue = pr({
+        author: { login: 'Danathar', is_bot: false },
+        body: `No issue: x\n${SIG}`,
+        closingIssuesReferences: [],
+    });
+    assert.deepEqual(auditPr(noIssue), ['linked-issue']);
+});
+
+test('hasLinkedIssue still reads only resolved closing references', () => {
+    assert.equal(hasLinkedIssue(noClosing('Refs #5')), false);
 });
