@@ -18,8 +18,12 @@
  *
  * Requirements checked per agent PR (see docs/agent-boundaries.md and AGENTS.md):
  *   linked-issue   GitHub's resolved closingIssuesReferences name an issue of
- *                  Danathar/openaudible-autoupdate (body text is not consulted; a missing
- *                  field counts as no link)
+ *                  Danathar/openaudible-autoupdate (a missing field counts as
+ *                  no link). A PR authored by the Hive App also passes with
+ *                  its own body line `Refs #N`, `Refs Danathar/<repo>#N` or
+ *                  `No issue: <reason>` (outside code fences); the Result
+ *                  column says which. Other agent PRs need the closing
+ *                  reference.
  *   signature      body has a `— hive: agent=...` line
  *   human-merge    merged by a human account or by the Hive App itself. This
  *                  repository uses the `hive-serialized` merge strategy: the
@@ -62,6 +66,14 @@ function lines(body) {
  * code blocks are examples, not a signature, and are skipped.
  */
 export function findSignature(body) {
+    for (const line of unfencedLines(body)) {
+        if (SIGNATURE_LINE.test(line)) return line;
+    }
+    return null;
+}
+
+/** Trimmed body lines outside fenced code blocks (examples, not statements). */
+function* unfencedLines(body) {
     let fence = null;
     for (const line of lines(body)) {
         const trimmed = line.trim();
@@ -83,9 +95,24 @@ export function findSignature(body) {
             }
             continue;
         }
-        if (fence === null && SIGNATURE_LINE.test(trimmed)) {
-            return trimmed;
-        }
+        if (fence === null) yield trimmed;
+    }
+}
+
+const REFS_LINE = /^Refs\s+((?:Danathar\/[A-Za-z0-9._-]+)?#\d+)$/;
+const NO_ISSUE_LINE = /^No issue:\s*\S.*$/;
+
+/**
+ * What a Hive-App-authored PR body says about its issue, as its own line
+ * outside code fences: `Refs #N` / `Refs Danathar/<repo>#N` gives
+ * `{kind: 'refs', ref}`, `No issue: <reason>` gives `{kind: 'no-issue'}`,
+ * otherwise null. Prose that merely mentions "refs" does not match.
+ */
+export function findIssueStatement(body) {
+    for (const line of unfencedLines(body)) {
+        const refs = REFS_LINE.exec(line);
+        if (refs) return { kind: 'refs', ref: refs[1] };
+        if (NO_ISSUE_LINE.test(line)) return { kind: 'no-issue' };
     }
     return null;
 }
@@ -116,6 +143,19 @@ export function hasLinkedIssue(pr) {
     );
 }
 
+/**
+ * How a PR satisfies the linked-issue rule, or null when it does not:
+ * `closes` (resolved closing reference), or, for PRs authored by the Hive
+ * App only, `refs #N` / `no issue stated` from the body.
+ */
+export function issueLink(pr) {
+    if (hasLinkedIssue(pr)) return 'closes';
+    if (!isHiveApp(pr?.author)) return null;
+    const st = findIssueStatement(pr?.body);
+    if (!st) return null;
+    return st.kind === 'refs' ? `refs ${st.ref}` : 'no issue stated';
+}
+
 export function isBotAccount(user) {
     if (!user || !user.login) return false;
     return (
@@ -137,7 +177,7 @@ export function isHiveApp(user) {
 export function auditPr(pr) {
     const violations = [];
 
-    if (!hasLinkedIssue(pr)) violations.push('linked-issue');
+    if (issueLink(pr) === null) violations.push('linked-issue');
     if (!findSignature(pr.body)) violations.push('signature');
 
     // The Hive App merging an agent PR is the hive-serialized lane: allowed.
@@ -183,6 +223,7 @@ export function buildReport(prs, options = {}) {
             mergedAt: (pr.mergedAt ?? '').slice(0, 10),
             violations: auditPr(pr),
             hiveLane: isHiveApp(pr.mergedBy),
+            issueLink: issueLink(pr),
         });
     }
     const violating = rows.filter((r) => r.violations.length > 0);
@@ -221,7 +262,9 @@ export function renderMarkdown(report) {
     for (const r of report.rows) {
         const result =
             r.violations.length === 0
-                ? 'ok'
+                ? r.issueLink && r.issueLink !== 'closes'
+                    ? `ok (${r.issueLink})`
+                    : 'ok'
                 : `violates: ${r.violations.join(', ')}`;
         out.push(
             `| [#${r.number}](${r.url}) ${cell(r.title)} | ${r.mergedAt} | ${r.detected} | ${cell(r.author)} | ${cell(r.mergedBy)}${r.hiveLane ? ' (Hive lane)' : ''} | ${result} |`
