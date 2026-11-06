@@ -30,7 +30,7 @@
 
 [AGENTS.md]
 ## What this repo is
-  prose: unchecked: restates the updater's steps, the manifest value shapes and the curl options
+  joined: scripts/tests/updater-steps-docs.test.mjs
 ## Files
   prose: unchecked: file table and the seven required check names, which docs/branch-protection.md and .github/rulesets/main.json also hold
 ## Hard rules
@@ -68,7 +68,7 @@
 
 [README.md]
 ## How it works
-  prose: unchecked: restates the updater's steps
+  joined: scripts/tests/updater-steps-docs.test.mjs
 ## Requirements
   joined: scripts/tests/updater-config-docs.test.mjs
 ## Install
@@ -214,7 +214,7 @@
 ### 1.1 The install path
   prose: unchecked: the order of checks before dnf install and the options the updater passes
 ### 1.2 Manifest fields are untrusted
-  prose: unchecked: the shape each manifest value must have
+  joined: scripts/tests/updater-steps-docs.test.mjs
 ### 1.3 Findings for the owner
   prose: narrative: open findings for the owner
 ## 2. Secrets
