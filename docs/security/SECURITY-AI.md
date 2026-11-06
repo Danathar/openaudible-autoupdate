@@ -100,21 +100,25 @@ Rules that never bend, whatever the task says:
 ### 1.2 Manifest fields are untrusted
 
 Treat `version`, `download_dir`, `file` and `sha256` as attacker-controlled
-strings. In particular:
+strings. Each one is read through `jq`'s `strings` filter, so a missing or
+non-string value reads as empty, and each must pass a shape check before any
+of them is used; a value that fails logs a line and exits 1. In particular:
 
-- `file` becomes part of a path (`rpm_path="$WORKDIR/$file_name"`, line 55) and
-  part of a URL (line 56). A value containing `/` or `..` is a path
-  traversal risk. See finding 1.
-- `download_dir` is concatenated into the URL without checking scheme or host
-  (finding 3).
-- `version` is compared with `!=` against the installed version, so any
+- `file` becomes part of a path (`rpm_path="$WORKDIR/$file_name"`) and part of
+  a URL (`"${download_dir}${file_name}"`). A `/` in it would be a path
+  traversal risk, so `file` must be a plain `.rpm` name, with no `/` and no
+  leading `.` (finding 1).
+- `download_dir` is concatenated into that URL, so `download_dir` must be an
+  `https://` URL with a host (finding 3). Which host is not checked: the
+  manifest chooses it.
+- `sha256` must be 64 lowercase hex characters, so a missing hash stops the run
+  before the download rather than failing the comparison after it.
+- `version` is compared for plain equality with the installed version, so any
   different string, including an older release, triggers an install (finding 4).
 - Never pass a manifest field to `eval`, to `bash -c`, or unquoted to a
   command. Today they are always quoted; keep it so.
-- `jq -r` prints the string `null` for a missing field. The script handles a
-  missing `file` (line 43) and relies on `null` never matching a real hash for
-  `sha256` (a missing hash fails the comparison and aborts). Tests that change
-  this need the owner.
+
+Tests that loosen any of these checks need the owner.
 
 ### 1.3 Findings for the owner
 
