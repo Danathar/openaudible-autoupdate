@@ -2,8 +2,10 @@ name: Nightly compliance
 
 # Checks that drift slowly or depend on the outside world, run every night
 # against main: the bats unit tests, shellcheck, the container end-to-end test,
-# and an upstream-contract check that the live OpenAudible manifest still has
-# the fields openaudible-autoupdate.sh reads. On a scheduled failure it opens or
+# an upstream-contract check that the live OpenAudible manifest still has
+# the fields openaudible-autoupdate.sh reads, and a compare of
+# policies/check-policies-corpus.json with its canonical copy in
+# Danathar/dns-failover (Danathar/akmods#245). On a scheduled failure it opens or
 # updates ONE tracking issue in this repository (GH_REPO below) and never
 # closes it. Tunables (manifest URL, platform key): .github/auto-qa-tuning.json.
 #
@@ -118,9 +120,35 @@ jobs:
           check "platforms.$key.sha256" ".platforms[\"$key\"].sha256 | strings" '^[0-9a-f]{64}$'
           exit "$rc"
 
+  check-policies-corpus:
+    name: Check-policies corpus
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # policies/check-policies-corpus.json is a copy of the canonical file in
+      # Danathar/dns-failover (Danathar/akmods#245). The checker test pins the
+      # copy's hash, which catches a local edit but not a copy that has fallen
+      # behind its original, so this compares it with dns-failover's main.
+      - name: Compare the check-policies corpus with dns-failover
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CORPUS: policies/check-policies-corpus.json
+        run: |
+          set -euo pipefail
+          want=$(gh api "repos/Danathar/dns-failover/contents/$CORPUS" -H 'Accept: application/vnd.github.raw' | sha256sum | cut -d' ' -f1)
+          got=$(sha256sum "$CORPUS" | cut -d' ' -f1)
+          if [ "$got" != "$want" ]; then
+            echo "::error::$CORPUS is $got; Danathar/dns-failover main has $want. Copy the file from there and update CORPUS_SHA256 in scripts/tests/check-policies.test.mjs."
+            exit 1
+          fi
+          echo "$CORPUS matches Danathar/dns-failover main ($got)."
+
   report:
     name: Open or update the tracking issue
-    needs: [unit, lint, e2e, upstream-contract]
+    needs: [unit, lint, e2e, upstream-contract, check-policies-corpus]
     if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -136,10 +164,11 @@ jobs:
           LINT: ${{ needs.lint.result }}
           E2E: ${{ needs.e2e.result }}
           UPSTREAM: ${{ needs.upstream-contract.result }}
+          CORPUS_RESULT: ${{ needs.check-policies-corpus.result }}
         run: |
           set -euo pipefail
           failed=""
-          for pair in "unit tests:$UNIT" "shellcheck:$LINT" "e2e:$E2E" "upstream manifest contract:$UPSTREAM"; do
+          for pair in "unit tests:$UNIT" "shellcheck:$LINT" "e2e:$E2E" "upstream manifest contract:$UPSTREAM" "check-policies corpus:$CORPUS_RESULT"; do
             [ "${pair#*:}" = "success" ] || failed="$failed ${pair%%:*} (${pair#*:});"
           done
           body=$(printf 'The nightly compliance run failed on %s.\n\nChecks that did not pass:%s\n\nRun: %s/%s/actions/runs/%s\n\nAn "upstream manifest contract" failure means OpenAudible changed %s; the updater script will fail on users'"'"' machines until it is adapted. This issue is not closed automatically; close it once the nightly is green.\n' \
