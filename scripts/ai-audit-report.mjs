@@ -99,13 +99,14 @@ function* unfencedLines(body) {
     }
 }
 
-const REFS_LINE = /^Refs\s+((?:Danathar\/[A-Za-z0-9._-]+)?#\d+)$/;
+const REFS_LINE = /^Refs\s+((?:Danathar\/[A-Za-z0-9._-]+)?#\d+)(?![\w-])/;
 const NO_ISSUE_LINE = /^No issue:\s*\S.*$/;
 
 /**
  * What a Hive-App-authored PR body says about its issue, as its own line
  * outside code fences: `Refs #N` / `Refs Danathar/<repo>#N` gives
- * `{kind: 'refs', ref}`, `No issue: <reason>` gives `{kind: 'no-issue'}`,
+ * `{kind: 'refs', ref}` (text after the number, such as a reason in
+ * parentheses or a dash, is allowed), `No issue: <reason>` gives `{kind: 'no-issue'}`,
  * otherwise null. Prose that merely mentions "refs" does not match.
  */
 export function findIssueStatement(body) {
