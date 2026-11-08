@@ -379,11 +379,24 @@ test('a Hive-App PR with no closing reference and no statement is still flagged'
     );
 });
 
+test('a Refs line may carry a reason after the issue number', () => {
+    for (const [line, ref] of [
+        ['Refs #12 (needs-human: owner must merge)', '#12'],
+        ['Refs #12 \u2014 the docs half is still open', '#12'],
+        ['Refs #5 and more', '#5'],
+        ['Refs Danathar/akmods#245 (owner chose option A)', 'Danathar/akmods#245'],
+    ]) {
+        assert.deepEqual(findIssueStatement(line), { kind: 'refs', ref }, line);
+        assert.deepEqual(auditPr(noClosing(line)), [], line);
+    }
+});
+
 test('Refs and No issue count only as their own line outside code fences', () => {
     for (const body of [
         'This work refs #5 in passing.',
         'See Refs #5 above',
-        'Refs #5 and more',
+        'Refs #5x',
+        'Refs #5-6',
         'Refs Other/repo#5',
         'We say No issue: because prose',
         '```\nRefs #5\n```',

@@ -92,7 +92,7 @@ reading and settled by the owner.
    you checked them against.
 2. **One branch per issue.** A pull request answers one issue (or one named
    group of issues) and says so with `Closes #N`, or, when it should leave
-   the issue open, a line `Refs #N` (or `Refs Danathar/<repo>#N`); a change with
+   the issue open, a line `Refs #N` (or `Refs Danathar/<repo>#N`), which may carry the reason after the number, such as `Refs #N (what remains)`; a change with
    no issue says `No issue: <reason>` on a line of its own. Branch names say what they do
    (Hive names its own branches; do not rely on a pattern); the ACMM effort used
    `acmm/<slug>` (see [`agent-tasks/2026-10-10.md`](agent-tasks/2026-10-10.md)).
