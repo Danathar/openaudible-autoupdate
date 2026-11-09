@@ -132,7 +132,8 @@ manifest must be a JSON object; `file` must be a plain `.rpm` name;
 `--proto =https --proto-redir =https`; `version` and `sha256` must be
 well-formed. In addition, the rpm header's name and version are checked
 before install, and the installed version is re-read after `dnf`. Findings 2
-and 4 remain open for the owner.
+and 4 remain open for the owner. Finding 5 (issue #187) was added
+later and is also the owner's.
 
 1. **`file` is not validated; `..` escapes the work directory.** Line 55 builds
    `"$WORKDIR/$file_name"` from the manifest value and line 56 downloads
@@ -162,6 +163,21 @@ and 4 remain open for the owner.
    an older version triggers a downgrade install; `rpm` and `dnf` may refuse a
    downgrade of an installed package, so impact depends on dnf's behavior,
    which was not tested here.
+5. **The `sudo` grant the timer needs is root for the whole session.** The
+   script runs from a systemd user unit, so README "Requirements" asks for
+   non-interactive `sudo` for `dnf install`. On a plain host that means a
+   sudoers `NOPASSWD:` rule for `dnf install`. The rpm sits in a `mktemp -d`
+   directory the user can write to, so no argument pattern in sudoers usefully
+   restricts which rpm it is given, and rpm scriptlets run as root. Any
+   process running as the user can install its own package as root at any
+   time, not only during the daily run, so the rule is equivalent to
+   `NOPASSWD: ALL`. A `NOPASSWD:` rule on the script is no narrower:
+   `%h/bin/openaudible-autoupdate.sh` is owned and writable by the user. In a rootless distrobox/toolbox the
+   `sudo` is the container's and container root maps to the user's uid, so
+   no host root is granted; a rootful container (`--root`) grants it again.
+   The README warns about this. Removing the grant (for example a root-owned
+   copy of the script run by a system unit) is a design decision for the
+   owner.
 
 ## 2. Secrets
 
