@@ -625,6 +625,8 @@ const blocked = [
     ['PATH=$PWD/tests/stubs:$PATH ./openaudible-autoupdate.sh', 'would execute'],
     [`PATH=${PROJECT}/tests/empty:$PATH ./openaudible-autoupdate.sh`, 'would execute'],
     [`PATH=${PROJECT}/tests/partial:$PATH ./openaudible-autoupdate.sh`, 'would execute'],
+    // An absolute tests/ dir that does not exist: PATH lookup falls through to the real sudo, dnf and rpm.
+    [`PATH=${PROJECT}/tests/missing:$PATH ./openaudible-autoupdate.sh`, 'would execute'],
     [`PATH=${PROJECT}/other/stubs:$PATH ./openaudible-autoupdate.sh`, 'would execute'],
     [`PATH=${PROJECT}/tests/../other/stubs:$PATH ./openaudible-autoupdate.sh`, 'would execute'],
     [`PATH=${PROJECT}/tests/stubs:$PATH systemd-run --user ./openaudible-autoupdate.sh`, 'would execute'],
