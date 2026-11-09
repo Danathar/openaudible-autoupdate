@@ -57,6 +57,17 @@ exits cleanly and does nothing.
 - passwordless (or otherwise non-interactive) `sudo` for `dnf install`,
   since the timer runs unattended
 
+> [!WARNING]
+> On a plain host, a password-free `sudo` rule for `dnf install` is the same
+> as password-free root for your account. The package is a file in a folder
+> you can write to, so a sudoers rule cannot usefully limit which one
+> `dnf install` is given, and an rpm's install scripts run as root, so
+> any program running as you can use the rule to take over the machine
+> without a prompt. Allowing the script itself is no safer: it lives in
+> `~/bin`, which you can edit. Inside a rootless distrobox or toolbox
+> container (see below) the `sudo` is the container's own and grants no root
+> on the host; one made with `distrobox create --root` does.
+
 ## Install
 
 This installs the update-checker (script + systemd timer) described above,
