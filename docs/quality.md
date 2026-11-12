@@ -9,25 +9,36 @@ command below names the repository so it works from any clone.
 
 **Last reviewed:** 2026-10-10, at `main` = `1305b17`.
 
-The signals are split by state, because this repository gained them in
-separate pull requests: the first table is what is on `main` (plus this PR's
-own PR-metrics files), the second is what exists only in an open PR and does
-not run on `main` yet.
+## Signals on `main`
 
-## Signals on `main` (1305b17)
+`scripts/tests/quality-signals-docs.test.mjs` holds this table and
+"Required checks" below to `.github/workflows/` and
+`.github/rulesets/main.json`: a new workflow or required check has to be
+written in here in the same change.
 
 | signal | where it lives | what it tells you | blocks merge |
 |---|---|---|---|
 | CI jobs | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml): `Lint (shellcheck)`, `Unit tests (<matrix entry>)`, `E2E (fedora container)` | shellcheck (pinned release), the bats unit tests in `tests/unit/` with stubbed commands (never a real `dnf`), and the container end-to-end test in `tests/e2e/` | yes, all three: see "Required checks" below |
 | coverage gate | [`.github/workflows/coverage-gate.yml`](../.github/workflows/coverage-gate.yml) (job `Coverage gate`), floor in [`.coverage-thresholds.json`](../.coverage-thresholds.json), checker `scripts/coverage-gate.mjs` | line coverage of `openaudible-autoupdate.sh` under the bats tests (kcov) has not dropped below the floor | yes: see "Required checks" below |
 | policy check | [`.github/workflows/policy-check.yml`](../.github/workflows/policy-check.yml) (job `policy-check`), `scripts/check-policies.mjs`, [`policies/`](../policies/README.md) | the repository still satisfies its machine-checkable policies (install safety, repo target, workflow permissions); `node scripts/check-policies.mjs` runs it locally | yes: see "Required checks" below |
+| agent tooling tests | [`.github/workflows/agent-tooling.yml`](../.github/workflows/agent-tooling.yml) (job `agent-tooling`) | `node --test` over every `*.test.mjs` under `scripts/tests/` and `.claude/hooks/tests/` | yes: see "Required checks" below |
 | nightly compliance | [`.github/workflows/nightly-compliance.yml`](../.github/workflows/nightly-compliance.yml) | every night against `main`: bats tests, shellcheck, the container e2e test, and an `upstream-contract` job that reads the live OpenAudible manifest and checks the fields the script uses are still there; a scheduled failure opens or updates one tracking issue | no, notification |
 | auto-QA | [`.github/workflows/auto-qa.yml`](../.github/workflows/auto-qa.yml), rules in [`.github/auto-qa-tuning.json`](../.github/auto-qa-tuning.json) | weekly: measures coverage and, when the floor can be raised, opens or updates one issue with the proposed diff; never pushes and never lowers the floor | no, report only |
 | agent audit | [`.github/workflows/agent-audit.yml`](../.github/workflows/agent-audit.yml), `scripts/ai-audit-report.mjs` | weekly: each merged agent PR has a linked issue, the signature line, an acceptable merger and base `main`; a violation fails the run | no, scheduled |
 | agent PR signature | [`.github/workflows/agent-signature.yml`](../.github/workflows/agent-signature.yml) (job `signature`), `scripts/pr-signature-check.mjs` | on an open agent PR (Hive app author or `ai-fix/` branch): the body has the signature line the agent audit requires, by the audit's own `findSignature` | no, advisory |
 | auto issues | [`.github/workflows/auto-issues.yml`](../.github/workflows/auto-issues.yml) | opens an issue for a red `main` | no, notification |
-| PR metrics | [`.github/workflows/pr-metrics.yml`](../.github/workflows/pr-metrics.yml), definitions in [metrics.md](metrics.md), readings in [metrics/](metrics/README.md) (this PR, #53) | acceptance rate and time to merge, by author class | no, report only |
+| PR metrics | [`.github/workflows/pr-metrics.yml`](../.github/workflows/pr-metrics.yml), definitions in [metrics.md](metrics.md), readings in [metrics/](metrics/README.md) (#53) | acceptance rate and time to merge, by author class | no, report only |
 | mutation check on changed lines | `scripts/mutation-check.mjs`, [`stryker.config.mjs`](../stryker.config.mjs), [`.mutation-survivors.json`](../.mutation-survivors.json); see [below](#mutation-check-on-changed-lines) | a changed line of the guard hook, its shared reader or a `scripts/*.mjs` script can be broken without any test failing | no, advisory |
+
+Also on `main` but not quality signals: `labeler.yml`, `ai-fix.yml` and
+`claude.yml` (agent automation). Codex review (`chatgpt-codex-connector[bot]`)
+may comment on a PR with `P0`-`P3` findings ([review-rubric.md](review-rubric.md));
+it is advisory and not guaranteed to be available.
+
+[`docs/review-rubric.md`](review-rubric.md) is the reader's side of the same
+picture. The property that matters most for this script, the
+[checksum-before-install invariant](review-rubric.md#2-the-checksum-before-install-invariant),
+is guarded by the tests of the mismatch path and by review, not by a metric.
 
 ## Required checks
 
@@ -41,26 +52,6 @@ which printed those six contexts; #58 records the ruleset as
 `.github/rulesets/main.json`. The strict
 setting means a PR must also be up to date with `main`. PR metrics is not
 required.
-
-## Signals that exist only in an open PR
-
-These are **planned, not on `main`**: the files are not in this tree, and
-their workflows only run once the PR merges. Links to them are deliberately
-not given, since they would not resolve.
-
-| signal | open PR | what it will tell you |
-|---|---|---|
-| agent tooling tests (`agent-tooling.yml`) | #57 | `node --test` over `scripts/tests/` and `.claude/hooks/tests/` |
-
-Also on `main` but not quality signals: `labeler.yml`, `ai-fix.yml` and
-`claude.yml` (agent automation). Codex review (`chatgpt-codex-connector[bot]`)
-may comment on a PR with `P0`-`P3` findings ([review-rubric.md](review-rubric.md));
-it is advisory and not guaranteed to be available.
-
-[`docs/review-rubric.md`](review-rubric.md) is the reader's side of the same
-picture. The property that matters most for this script, the
-[checksum-before-install invariant](review-rubric.md#2-the-checksum-before-install-invariant),
-is guarded by the tests of the mismatch path and by review, not by a metric.
 
 ## Mutation check on changed lines
 

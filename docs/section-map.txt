@@ -161,12 +161,10 @@
   prose: narrative: pointers to the rules
 
 [docs/quality.md]
-## Signals on `main` (1305b17)
-  prose: narrative: a snapshot pinned to the commit it was read at
+## Signals on `main`
+  joined: scripts/tests/quality-signals-docs.test.mjs
 ## Required checks
-  prose: unchecked: the required check names, which .github/rulesets/main.json holds
-## Signals that exist only in an open PR
-  prose: unchecked: names the jobs that run only on pull requests
+  joined: scripts/tests/quality-signals-docs.test.mjs
 ## Mutation check on changed lines
   prose: unchecked: what scripts/mutation-check.mjs runs and its budget
 ## Where to look
