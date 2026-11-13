@@ -29,7 +29,7 @@ function git(cwd, env, ...args) {
 const IDENT = ['-c', 'user.name=t', '-c', 'user.email=t@t'];
 
 // Builds a clone whose tree carries a committed bare repository `evil/` that has
-// one commit and a diff.x.textconv program (applied to every file by
+// one commit (refs/ kept by a placeholder file) and a diff.x.textconv program (applied to every file by
 // info/attributes) that writes `marker`. Returns the clone's path.
 function plantedClone(dir, marker) {
     const env = baseEnv(dir);
@@ -44,6 +44,9 @@ function plantedClone(dir, marker) {
     assert.equal(git(dir, env, 'clone', '-q', '--bare', seed, evil).status, 0);
     mkdirSync(join(evil, 'info'), { recursive: true });
     writeFileSync(join(evil, 'info', 'attributes'), '* diff=x\n');
+    // git does not track empty directories, and a directory without refs/ is
+    // not a repository, so keep a file in refs/ for the clone to carry it.
+    writeFileSync(join(evil, 'refs', '.keep'), '');
     assert.equal(git(evil, env, 'config', 'diff.x.textconv', `touch '${marker}'; cat`).status, 0);
     assert.equal(git(src, env, 'add', 'evil').status, 0);
     assert.equal(git(src, env, ...IDENT, 'commit', '-qm', 'x').status, 0);
