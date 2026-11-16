@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SETTINGS = fileURLToPath(new URL('../../.claude/settings.json', import.meta.url));
+const HOOK = fileURLToPath(new URL('../../.claude/hooks/guard-bash.mjs', import.meta.url));
 const settingsEnv = JSON.parse(readFileSync(SETTINGS, 'utf8')).env ?? {};
 
 // A clean git environment: no user or system config, no inherited GIT_* overrides.
@@ -95,4 +96,36 @@ test('a committed bare repository cannot make pre-approved git show or git log r
     // The checkout's own repository (.git/, not bare) still works with the setting.
     assert.equal(git(victim, agentEnv, 'status', '--short').status, 0);
     assert.equal(git(victim, agentEnv, 'log', '-1', '--format=%s').stdout.trim(), 'x');
+});
+
+// safe.bareRepository=explicit allows a bare repository that is named, and
+// `--git-dir <dir>` and `--bare` are how one is named, so the setting does not
+// stop these routes: the guard hook refuses them instead (#202). The program
+// running here with the env applied is what makes that refusal necessary.
+test('a named bare repository still runs the program, so the guard hook refuses it', (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'bare-repo-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const marker = join(dir, 'ran');
+    const victim = plantedClone(dir, marker);
+    const agentEnv = { ...baseEnv(dir), ...settingsEnv };
+    const routes = [
+        [victim, ['--git-dir=evil', 'log', '-p', '-1']],
+        [victim, ['--git-dir', 'evil', 'show']],
+        [join(victim, 'evil'), ['--bare', 'show']],
+        [join(victim, 'evil'), ['--bare', 'log', '-p', '-1']],
+    ];
+    for (const [cwd, argv] of routes) {
+        git(cwd, agentEnv, ...argv);
+        assert.ok(existsSync(marker), `precondition: with the settings env git ${argv.join(' ')} runs the planted textconv`);
+        rmSync(marker);
+        const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command: `git ${argv.join(' ')}` } });
+        const r = spawnSync(process.execPath, [HOOK], {
+            input,
+            encoding: 'utf8',
+            cwd,
+            env: { ...process.env, CLAUDE_PROJECT_DIR: victim },
+        });
+        assert.equal(r.status, 2, `the guard hook should refuse git ${argv.join(' ')}`);
+        assert.match(r.stderr, /another repository/);
+    }
 });
