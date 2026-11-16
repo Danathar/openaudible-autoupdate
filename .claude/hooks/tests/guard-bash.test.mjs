@@ -138,6 +138,10 @@ const allowed = [
     'git push --follow-tags origin main',
     'git push origin HEAD:refs/heads/acmm/claude-guard',
     'git -C ../wt push origin main',
+    // --bare after the subcommand is that subcommand's own flag, not git's (#202)
+    'git init --bare x',
+    'git show --bare',
+    'git --namespace x log -1',
     'git fetch upstream',
     // -u is --update-head-ok on fetch, and --exit-code is not --exec
     'git fetch -u origin main',
@@ -373,6 +377,17 @@ const blocked = [
     ['git -c core.pager=./x.sh log', 'core.pager'],
     ['git -c alias.l=!./x.sh l', 'alias.l'],
     ['git --exec-path=/tmp/x log', '--exec-path'],
+    // --git-dir and --bare name a repository, which safe.bareRepository=explicit
+    // allows, so a committed bare repository's textconv runs (#202); --work-tree
+    // reads another directory. `--namespace x` before them is stepped over.
+    ['git --git-dir=evil log -p', 'another repository'],
+    ['git --git-dir evil show', 'another repository'],
+    ['git --bare show', 'another repository'],
+    ['git --no-pager --bare log -p -1', 'another repository'],
+    ['git --work-tree=/etc diff HEAD', 'another repository'],
+    ['git --work-tree /etc diff HEAD', 'another repository'],
+    ['git --namespace x --git-dir=.git diff HEAD', 'another repository'],
+    ['timeout 5 git --git-dir=evil show', 'another repository'],
     // git fetch|pull|clone|ls-remote|archive options that run the program they name
     ['git fetch --upload-pack x ../src', 'runs the program'],
     ['git fetch --upload-pack=x', 'runs the program'],

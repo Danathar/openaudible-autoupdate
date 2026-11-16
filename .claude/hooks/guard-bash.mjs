@@ -38,7 +38,8 @@
 //   - git config / git remote changes that re-point `origin` or push URLs.
 //   - git options that write a file, read outside the repository or run a
 //     program on the pre-approved read commands: --output[=FILE], --no-index,
-//     --ext-diff, git grep -O/--open-files-in-pager, --exec-path=DIR, and
+//     --ext-diff, git grep -O/--open-files-in-pager, --exec-path=DIR,
+//     --git-dir, --bare and --work-tree before the subcommand, and
 //     `-c` keys such as diff.external, core.pager, alias.*, protocol.*
 //     (protocol.ext.allow=always); GIT_* / PAGER / EDITOR variables (inline or
 //     exported) other than identity and no-op pagers (GIT_EXTERNAL_DIFF=,
@@ -411,7 +412,19 @@ function checkGit(args, inlineEnv = {}, exported = {}) {
         if (a.startsWith('--exec-path=')) {
             return block('Blocked: `git --exec-path=DIR` runs git commands from another directory.');
         }
-        i += ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'].includes(a) ? 2 : 1;
+        // safe.bareRepository=explicit (.claude/settings.json) refuses a bare
+        // repository git discovers, but allows one that is named, and naming
+        // one is what --git-dir and --bare (--git-dir=.) do: a bare repository
+        // committed into a branch then runs the diff.x.textconv program its
+        // config names on `git --git-dir=evil log -p`. --work-tree compares
+        // tracked paths against another directory, a read outside the checkout.
+        if (/^--(git-dir|work-tree)(=|$)|^--bare$/.test(a)) {
+            return block(
+                `Blocked: \`git ${a}\` points git at another repository or working tree, ` +
+                    'whose config can name a program to run; run git from the checkout without it.'
+            );
+        }
+        i += ['-C', '-c', '--namespace', '--config-env'].includes(a) ? 2 : 1;
     }
     const sub = args[i];
     const rest = args.slice(i + 1);
