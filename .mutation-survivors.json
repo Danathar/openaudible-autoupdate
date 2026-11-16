@@ -196,6 +196,13 @@
             "original": "'&'",
             "replacement": "\"\"",
             "reason": "closeParen() (akmods#215 reader): equivalent in the `;;&` skip, as for `input[j + 1] === ';'` -> true: it only changes whether one more `;` or `&` separator is read in pattern state."
+        },
+        {
+            "file": ".claude/hooks/guard-bash.mjs",
+            "mutator": "Regex",
+            "original": "/^--(git-dir|work-tree)(=|$)|^--bare$/",
+            "replacement": "/^--(git-dir|work-tree)(=|$)|^--bare/",
+            "reason": "Harmless over-refusal: it also refuses a git option that starts with --bare but is longer, and git has no such option (it rejects one as unknown), so no command that runs today is refused."
         }
     ]
 }

@@ -142,6 +142,10 @@ const allowed = [
     'git init --bare x',
     'git show --bare',
     'git --namespace x log -1',
+    // only a whole --git-dir/--work-tree/--bare option is refused, not a value
+    // that merely ends in one
+    'git --namespace=ref--git-dir log -1',
+    'git --namespace=ref--bare log -1',
     'git fetch upstream',
     // -u is --update-head-ok on fetch, and --exit-code is not --exec
     'git fetch -u origin main',
@@ -388,6 +392,11 @@ const blocked = [
     ['git --work-tree /etc diff HEAD', 'another repository'],
     ['git --namespace x --git-dir=.git diff HEAD', 'another repository'],
     ['timeout 5 git --git-dir=evil show', 'another repository'],
+    // -c and --config-env take a value, so the option after them is still read
+    // as git's own; skipping only one word would leave --git-dir unchecked
+    ['git -c color.ui=never --git-dir=evil log -p', 'another repository'],
+    ['git --config-env color.ui=X --bare log -p', 'another repository'],
+    ['git --bare log', 'run git from the checkout without it'],
     // git fetch|pull|clone|ls-remote|archive options that run the program they name
     ['git fetch --upload-pack x ../src', 'runs the program'],
     ['git fetch --upload-pack=x', 'runs the program'],
