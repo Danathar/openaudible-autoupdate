@@ -41,7 +41,8 @@
 //     --ext-diff, git grep -O/--open-files-in-pager, --exec-path=DIR,
 //     --git-dir, --bare and --work-tree before the subcommand, and
 //     `-c` keys such as diff.external, core.pager, alias.*, protocol.*
-//     (protocol.ext.allow=always); GIT_* / PAGER / EDITOR variables (inline or
+//     (protocol.ext.allow=always) and safe.* (it overrides the
+//     safe.bareRepository=explicit setting in .claude/settings.json); GIT_* / PAGER / EDITOR variables (inline or
 //     exported) other than identity and no-op pagers (GIT_EXTERNAL_DIFF=,
 //     GIT_TRACE=FILE, GIT_DIR=, ...).
 //   - --upload-pack (and its abbreviations such as --upl), --exec and
@@ -408,6 +409,17 @@ function checkGit(args, inlineEnv = {}, exported = {}) {
         }
         if (configKey !== null && EXEC_GIT_CONFIG.test(configKey)) {
             return block(`Blocked: \`git ${a} ${configKey}=...\` makes git run a program or read other config.`);
+        }
+        // `-c` is read at the same scope as the GIT_CONFIG_* env in
+        // .claude/settings.json and wins over it, so `-c safe.bareRepository=all`
+        // would switch that protection off: git would load a bare repository a
+        // branch committed and run its diff.*.textconv program. git reads the
+        // section name in any case.
+        if (configKey !== null && /^safe\./i.test(configKey)) {
+            return block(
+                `Blocked: \`git ${a} ${configKey}=...\` overrides the safe.* setting in .claude/settings.json ` +
+                    'that stops a committed repository folder from running a program. Run git without it.'
+            );
         }
         if (a.startsWith('--exec-path=')) {
             return block('Blocked: `git --exec-path=DIR` runs git commands from another directory.');

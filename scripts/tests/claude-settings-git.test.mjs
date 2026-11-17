@@ -129,3 +129,33 @@ test('a named bare repository still runs the program, so the guard hook refuses 
         assert.match(r.stderr, /another repository/);
     }
 });
+
+// git reads `-c` and `--config-env` at the same scope as the GIT_CONFIG_*
+// settings env, and the later value wins, so `git -c safe.bareRepository=all`
+// switches the protection off for that one command. The guard hook refuses it.
+test('a command-line safe.bareRepository override still runs the program, so the guard hook refuses it', (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'bare-repo-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const marker = join(dir, 'ran');
+    const victim = plantedClone(dir, marker);
+    const agentEnv = { ...baseEnv(dir), ...settingsEnv, SBR: 'all' };
+    const cwd = join(victim, 'evil');
+    const routes = [
+        ['-c', 'safe.bareRepository=all', 'log', '-p', '-1'],
+        ['--config-env=safe.bareRepository=SBR', 'log', '-p', '-1'],
+    ];
+    for (const argv of routes) {
+        git(cwd, agentEnv, ...argv);
+        assert.ok(existsSync(marker), `precondition: with the settings env git ${argv.join(' ')} runs the planted textconv`);
+        rmSync(marker);
+        const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command: `git ${argv.join(' ')}` } });
+        const r = spawnSync(process.execPath, [HOOK], {
+            input,
+            encoding: 'utf8',
+            cwd,
+            env: { ...process.env, CLAUDE_PROJECT_DIR: victim },
+        });
+        assert.equal(r.status, 2, `the guard hook should refuse git ${argv.join(' ')}`);
+        assert.match(r.stderr, /safe\.bareRepository/);
+    }
+});
