@@ -203,6 +203,13 @@
             "original": "/^--(git-dir|work-tree)(=|$)|^--bare$/",
             "replacement": "/^--(git-dir|work-tree)(=|$)|^--bare/",
             "reason": "Harmless over-refusal: it also refuses a git option that starts with --bare but is longer, and git has no such option (it rejects one as unknown), so no command that runs today is refused."
+        },
+        {
+            "file": ".claude/hooks/guard-bash.mjs",
+            "mutator": "ConditionalExpression",
+            "original": "configKey !== null",
+            "replacement": "true",
+            "reason": "Equivalent in the safe.* refusal: configKey is null only when the option is neither `-c` nor `--config-env`, and then `/^safe\\./i.test(null)` tests the text \"null\", which never starts with `safe.`, so the refusal is the same either way."
         }
     ]
 }

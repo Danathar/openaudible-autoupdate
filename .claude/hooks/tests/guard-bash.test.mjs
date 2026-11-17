@@ -146,6 +146,8 @@ const allowed = [
     // that merely ends in one
     'git --namespace=ref--git-dir log -1',
     'git --namespace=ref--bare log -1',
+    // only a key in the safe.* section is refused, not one that merely contains it
+    'git -c branch.unsafe.merge=x status',
     'git fetch upstream',
     // -u is --update-head-ok on fetch, and --exit-code is not --exec
     'git fetch -u origin main',
@@ -397,6 +399,17 @@ const blocked = [
     ['git -c color.ui=never --git-dir=evil log -p', 'another repository'],
     ['git --config-env color.ui=X --bare log -p', 'another repository'],
     ['git --bare log', 'run git from the checkout without it'],
+    // `-c` / `--config-env` would override the safe.bareRepository=explicit
+    // settings env, so a discovered bare repository's textconv would run again
+    ['git -c safe.bareRepository=all log -p', 'safe.bareRepository'],
+    ['git -c safe.bareRepository=all -C evil show', 'safe.bareRepository'],
+    ['git -c SAFE.BAREREPOSITORY=all show', 'SAFE.BAREREPOSITORY'],
+    ['git -c safe.directory=* -C evil show', 'safe.directory'],
+    ['git -c user.name=x -c safe.bareRepository=all show', 'safe.bareRepository'],
+    ['git --config-env=safe.bareRepository=V log -p', 'safe.bareRepository'],
+    ['git --config-env safe.bareRepository=V show', 'safe.bareRepository'],
+    ['cd evil && git -c safe.bareRepository=all show', 'safe.bareRepository'],
+    ['git -c safe.bareRepository=all diff HEAD~1', 'overrides the safe.* setting'],
     // git fetch|pull|clone|ls-remote|archive options that run the program they name
     ['git fetch --upload-pack x ../src', 'runs the program'],
     ['git fetch --upload-pack=x', 'runs the program'],
