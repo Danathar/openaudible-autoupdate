@@ -175,7 +175,7 @@ const allowed = [
     'nice -n 5 shellcheck openaudible-autoupdate.sh',
     // Packed and abbreviated wrapper options still reach the command they wrap.
     'timeout 5 git status',
-    'env -iu X git status',
+    'env -vu X git status',
     // `time` (keyword and /usr/bin/time) runs the command after its own options.
     'time -p git status',
     '/usr/bin/time -o /var/tmp/t git status',
@@ -345,6 +345,19 @@ const allowed = [
     'echo "$(case a in a) echo hi;; esac) done"',
     'x=$(case a in (a) echo hi;; b|c) echo no;& d) echo x;;& esac); echo "$x"',
     'echo $(echo case a in a) git push --force origin main',
+    // Removing or un-exporting another variable, or clearing the environment of
+    // a command that is not git, leaves the GIT_CONFIG_* settings env alone.
+    'unset FOO; git log -1',
+    'unset -v FOO BAR',
+    'env -u FOO git log -1',
+    'env --unset=FOO git log -1',
+    'export -n FOO',
+    'declare +x FOO',
+    'env -i ls',
+    'exec -a name ls',
+    'git grep "env -i"',
+    // --attr-source takes the next word as its value and names no repository.
+    'git --attr-source HEAD log -p -1',
 ];
 
 const blocked = [
@@ -410,6 +423,36 @@ const blocked = [
     ['git --config-env safe.bareRepository=V show', 'safe.bareRepository'],
     ['cd evil && git -c safe.bareRepository=all show', 'safe.bareRepository'],
     ['git -c safe.bareRepository=all diff HEAD~1', 'overrides the safe.* setting'],
+    // A separated --attr-source value is not the subcommand; what follows is still read.
+    ['git --attr-source HEAD -c safe.bareRepository=all log -p', 'overrides the safe.* setting'],
+    ['git --attr-source HEAD --git-dir=evil log -p', 'another repository'],
+    // Removing, un-exporting or overwriting the GIT_CONFIG_* settings env, or
+    // emptying git's environment, switches the same protection off.
+    ['unset GIT_CONFIG_COUNT; git log -p', 'unset GIT_CONFIG_COUNT'],
+    ['unset GIT_CONFIG_KEY_0', 'remove the GIT_CONFIG_* settings env'],
+    ['unset ${!GIT_CONFIG@}', 'remove the GIT_CONFIG_* settings env'],
+    ['unset $v', 'unset $v'],
+    ['declare +x GIT_CONFIG_COUNT; git log -p', 'remove the GIT_CONFIG_* settings env'],
+    ['typeset +x GIT_CONFIG_VALUE_0', 'remove the GIT_CONFIG_* settings env'],
+    ['local +x GIT_CONFIG_COUNT', 'remove the GIT_CONFIG_* settings env'],
+    ['env -u GIT_CONFIG_COUNT git log -p', 'env -u GIT_CONFIG_COUNT'],
+    ['env -uGIT_CONFIG_COUNT git log -p', 'env -u GIT_CONFIG_COUNT'],
+    ['env --unset=GIT_CONFIG_COUNT git log -p', 'env -u GIT_CONFIG_COUNT'],
+    ['env --uns GIT_CONFIG_COUNT git log -p', 'env -u GIT_CONFIG_COUNT'],
+    ['env -i git log -p', 'without the GIT_CONFIG_* settings env'],
+    ['env - git log -p', 'without the GIT_CONFIG_* settings env'],
+    ['env --ignore-environment git log -p', 'without the GIT_CONFIG_* settings env'],
+    ['env -iv git log -p', 'without the GIT_CONFIG_* settings env'],
+    ['timeout 5 env -i git log -p', 'without the GIT_CONFIG_* settings env'],
+    ["env -i bash -c 'git log -p'", 'without the GIT_CONFIG_* settings env'],
+    ["env -S '-i git log -p'", 'without the GIT_CONFIG_* settings env'],
+    ['exec -c git log -p', 'without the GIT_CONFIG_* settings env'],
+    ['exec -cl git log -p', 'without the GIT_CONFIG_* settings env'],
+    ['exec -a x -c git log -p', 'without the GIT_CONFIG_* settings env'],
+    ['GIT_CONFIG_COUNT=0; git log -p', 'overwrites the GIT_CONFIG_* settings env'],
+    ['GIT_CONFIG_VALUE_0=all', 'overwrites the GIT_CONFIG_* settings env'],
+    ['declare GIT_CONFIG_COUNT=0', 'overwrites the GIT_CONFIG_* settings env'],
+    ['readonly GIT_CONFIG_COUNT=0', 'overwrites the GIT_CONFIG_* settings env'],
     // git fetch|pull|clone|ls-remote|archive options that run the program they name
     ['git fetch --upload-pack x ../src', 'runs the program'],
     ['git fetch --upload-pack=x', 'runs the program'],

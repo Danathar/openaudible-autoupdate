@@ -143,6 +143,7 @@ test('a command-line safe.bareRepository override still runs the program, so the
     const routes = [
         ['-c', 'safe.bareRepository=all', 'log', '-p', '-1'],
         ['--config-env=safe.bareRepository=SBR', 'log', '-p', '-1'],
+        ['--attr-source', 'HEAD', '-c', 'safe.bareRepository=all', 'log', '-p', '-1'],
     ];
     for (const argv of routes) {
         git(cwd, agentEnv, ...argv);
@@ -157,5 +158,39 @@ test('a command-line safe.bareRepository override still runs the program, so the
         });
         assert.equal(r.status, 2, `the guard hook should refuse git ${argv.join(' ')}`);
         assert.match(r.stderr, /safe\.bareRepository/);
+    }
+});
+
+// Removing the GIT_CONFIG_* settings env, or setting its count to 0, puts git
+// back on its default safe.bareRepository=all, so the planted program runs
+// again. The guard hook refuses each way of doing that.
+test('removing the settings env still runs the program, so the guard hook refuses it', (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'bare-repo-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const marker = join(dir, 'ran');
+    const victim = plantedClone(dir, marker);
+    const agentEnv = { ...baseEnv(dir), ...settingsEnv };
+    const cwd = join(victim, 'evil');
+    for (const command of [
+        'unset GIT_CONFIG_COUNT; git log -p -1',
+        'declare +x GIT_CONFIG_COUNT; git log -p -1',
+        'GIT_CONFIG_COUNT=0; git log -p -1',
+        'env -u GIT_CONFIG_COUNT git log -p -1',
+        'env -i git log -p -1',
+        'exec -c git log -p -1',
+    ]) {
+        spawnSync('bash', ['-c', 'git log -p -1'], { cwd, env: agentEnv, encoding: 'utf8' });
+        assert.ok(!existsSync(marker), 'precondition: the settings env stops the planted repository');
+        spawnSync('bash', ['-c', command], { cwd, env: agentEnv, encoding: 'utf8' });
+        assert.ok(existsSync(marker), `precondition: ${command} runs the planted textconv`);
+        rmSync(marker);
+        const r = spawnSync(process.execPath, [HOOK], {
+            input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
+            encoding: 'utf8',
+            cwd,
+            env: { ...process.env, CLAUDE_PROJECT_DIR: victim },
+        });
+        assert.equal(r.status, 2, `the guard hook should refuse ${command}: ${r.stderr}`);
+        assert.match(r.stderr, /GIT_CONFIG_\* settings env/);
     }
 });
