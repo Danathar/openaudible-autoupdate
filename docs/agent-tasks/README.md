@@ -49,12 +49,12 @@ The marks a change carries, and where to read them:
   audit accepts it and shows "ok (refs #N)" or "ok (no issue stated)" in the
   Result column. Other agent pull requests still need the closing reference.
 
-- **Hive signature.** Hive PRs end with a line like `— hive: agent=<name>` and
+- **Hive signature.** Hive PRs end with a line like `-- hive: agent=<name>` (PRs before 2026-11-18 carry `— hive:`) and
   are opened by `app/danathar-atomic-hive`:
 
   ```bash
   gh pr view <N> --repo Danathar/openaudible-autoupdate --json author,body \
-    --jq '.author.login, (.body | split("\n") | map(select(startswith("— hive: "))))'
+    --jq '.author.login, (.body | split("\n") | map(select(test("^(--|—) hive: "))))'
   ```
 
   A PR the owner opened from a local session carries the owner's login and may

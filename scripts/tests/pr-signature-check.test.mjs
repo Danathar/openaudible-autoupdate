@@ -29,6 +29,9 @@ const PASSING = [
     `Summary\r\n\r\n${SIG}\r\n`,
     `  ${SIG}  `,
     '— hive: agent=docs-writer',
+    '-- hive: agent=scanner backend=claude model=claude-sonnet-5-5 effort=high',
+    `Summary\r\n\r\n-- hive: agent=scanner\r\n`,
+    '  -- hive: agent=docs-writer  ',
 ];
 
 const FAILING = [
@@ -37,6 +40,13 @@ const FAILING = [
     'Summary\n\nFiled by quality agent\n',
     '— hive:\n',
     '— hive: backend=claude model=x\n',
+    '-- hive: backend=claude model=x\n',
+    '-- hive:\n',
+    '- hive: agent=x',
+    '--- hive: agent=x',
+    '--hive: agent=x',
+    '\u2013 hive: agent=x',
+    'see -- hive: agent=x',
     `Quoted: ${SIG}\n`,
     `Example:\n\`\`\`\n${SIG}\n\`\`\`\n`,
 ];
