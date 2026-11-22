@@ -58,6 +58,15 @@ const allowed = [
     // --- node --test and read-only git: the forms .claude/settings.json pre-approves ---
     'node --test scripts/tests/',
     'node --test .claude/hooks/tests/',
+    // reading HOME, or setting it for a program other than git, is not refused
+    'cd "$HOME" && git status',
+    'echo "$HOME"',
+    "env --split-string 'git log -1'",
+    'TZ=UTC; git log -1',
+    'MYHOME=x; git log -1',
+    'HOMEDIR=x git log -1',
+    'export HOME',
+    'git -C . status',
     'node --test scripts/tests/*.test.mjs',
     'node --test scripts/tests/pr-metrics.test.mjs .claude/hooks/tests/guard-bash.test.mjs',
     'node --test --test-name-pattern="repo flag" scripts/tests/',
@@ -453,6 +462,24 @@ const blocked = [
     ['GIT_CONFIG_VALUE_0=all', 'overwrites the GIT_CONFIG_* settings env'],
     ['declare GIT_CONFIG_COUNT=0', 'overwrites the GIT_CONFIG_* settings env'],
     ['readonly GIT_CONFIG_COUNT=0', 'overwrites the GIT_CONFIG_* settings env'],
+    // env --split-string keeps its value whole, so the -i inside it is read (shared reader fix, akmods #310)
+    ["env --split-string '-i git log -p'", 'without the GIT_CONFIG_* settings env'],
+    ["env --split '-i git log -p'", 'without the GIT_CONFIG_* settings env'],
+    // git --shallow-file reads a chosen file and quotes it; the walk must not stop at its value
+    ['git --shallow-file .env log -1', '--shallow-file'],
+    ['git --shallow-file=.env log -1', '--shallow-file'],
+    ['git --shallow-file x push --force origin main', '--shallow-file'],
+    ['git -C . --shallow-file HEAD --git-dir=evil log -p', '--shallow-file'],
+    // HOME / XDG_CONFIG_HOME move the folder git reads its global config from
+    ['HOME=planted git diff HEAD~1 HEAD', 'global config'],
+    ['env HOME=planted git log -p', 'global config'],
+    ['XDG_CONFIG_HOME=planted git diff HEAD~1 HEAD', 'global config'],
+    ['HOME=planted; git log -p', 'global config'],
+    ['HOME+=/planted; git log -p', 'global config'],
+    ['export HOME=planted; git diff HEAD~1 HEAD', 'global config'],
+    ['export XDG_CONFIG_HOME=planted && git log -p', 'global config'],
+    ['declare HOME=planted', 'global config'],
+    ['readonly XDG_CONFIG_HOME=planted', 'global config'],
     // git fetch|pull|clone|ls-remote|archive options that run the program they name
     ['git fetch --upload-pack x ../src', 'runs the program'],
     ['git fetch --upload-pack=x', 'runs the program'],

@@ -51,6 +51,11 @@
 //     of export/declare/typeset/local/readonly; and git run behind `env -i`,
 //     `--ignore-environment`, a lone `-`, or `exec -c`, which empty its
 //     environment.
+//   - HOME or XDG_CONFIG_HOME set in front of git, as a statement of its own,
+//     or with export/declare/typeset/local/readonly: they pick the folder git
+//     reads its global config from, which the settings env does not replace.
+//   - git --shallow-file before the subcommand: it reads a chosen file (.env)
+//     and quotes it in its error.
 //   - --upload-pack (and its abbreviations such as --upl), --exec and
 //     clone/ls-remote -u on git fetch|pull|clone|ls-remote|archive, which run
 //     the program they name.
@@ -431,6 +436,22 @@ function blockSettingsEnvOverwrite(what) {
     );
 }
 
+// HOME and XDG_CONFIG_HOME pick the folder git reads its global config from
+// (`$HOME/.gitconfig`, `$XDG_CONFIG_HOME/git/config`). The GIT_CONFIG_* settings
+// env in .claude/settings.json does not replace that file, so
+// `HOME=planted git diff` runs a diff.external that a branch committed in
+// planted/.gitconfig. HOME is always exported, so a statement of its own
+// (`HOME=planted; git log -p`) reaches every later git too. A key `NAME+` is a
+// `NAME+=value` assignment.
+const CONFIG_HOME_ENV = /^(HOME|XDG_CONFIG_HOME)\+?$/;
+
+function blockConfigHome(what) {
+    return block(
+        `Blocked: \`${what}\` moves the folder git reads its global config from, and a config there can name a ` +
+            'program for git to run. Run git with the HOME you already have.'
+    );
+}
+
 function checkGit(args, inlineEnv = {}, exported = {}) {
     // Walk global options to find the subcommand, vetting `-c key=value`.
     let i = 0;
@@ -456,6 +477,12 @@ function checkGit(args, inlineEnv = {}, exported = {}) {
                     'that stops a committed repository folder from running a program. Run git without it.'
             );
         }
+        // `--shallow-file PATH` reads PATH as the shallow list, and git's error
+        // quotes the first line it cannot parse, so `--shallow-file .env`
+        // prints it. Ordinary work never needs it.
+        if (a === '--shallow-file' || a.startsWith('--shallow-file=')) {
+            return block('Blocked: `git --shallow-file` reads a chosen file (e.g. .env) and quotes it in its error.');
+        }
         if (a.startsWith('--exec-path=')) {
             return block('Blocked: `git --exec-path=DIR` runs git commands from another directory.');
         }
@@ -480,6 +507,8 @@ function checkGit(args, inlineEnv = {}, exported = {}) {
     const rest = args.slice(i + 1);
 
     const env = { ...exported, ...inlineEnv };
+    const homeKey = Object.keys(inlineEnv).find((k) => CONFIG_HOME_ENV.test(k));
+    if (homeKey !== undefined) return blockConfigHome(`${homeKey}=${inlineEnv[homeKey]} git`);
     if (sub === 'push') {
         const pushKey = Object.keys(env).find((k) => /^(GIT_CONFIG_|GIT_SSH)/i.test(k));
         if (pushKey) return block(`Blocked: \`git push\` with ${pushKey}= could redirect the push.`);
@@ -1192,6 +1221,8 @@ function checkSegment(words, state) {
             // Only assignments: they set shell variables, and an exported one keeps its export.
             const name = Object.keys(inlineEnv).find((k) => k.includes('GIT_CONFIG'));
             if (name !== undefined) return blockSettingsEnvOverwrite(`${name}=${inlineEnv[name]}`);
+            const home = Object.keys(inlineEnv).find((k) => CONFIG_HOME_ENV.test(k));
+            if (home !== undefined) return blockConfigHome(`${home}=${inlineEnv[home]}`);
             return null;
         }
         // A command word the shell reads as a checked command (`{git,}`,
@@ -1347,6 +1378,8 @@ function checkSegment(words, state) {
             if (a.startsWith('-') || a.startsWith('+')) continue;
             const eq = a.indexOf('=');
             if (!exports && eq !== -1 && a.slice(0, eq).includes('GIT_CONFIG')) return blockSettingsEnvOverwrite(`${cmd} ${a}`);
+            const name = eq === -1 ? a : a.slice(0, eq);
+            if (eq !== -1 && CONFIG_HOME_ENV.test(name)) return blockConfigHome(`${cmd} ${a}`);
             if (unexports && removesSettingsEnv(eq === -1 ? a : a.slice(0, eq))) {
                 const flags = args.filter((o) => o.startsWith('-') || o.startsWith('+'));
                 return blockSettingsEnvRemoval([cmd, ...flags, a].join(' '));
