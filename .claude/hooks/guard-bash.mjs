@@ -54,6 +54,14 @@
 //   - HOME or XDG_CONFIG_HOME set in front of git, as a statement of its own,
 //     or with export/declare/typeset/local/readonly: they pick the folder git
 //     reads its global config from, which the settings env does not replace.
+//   - those same names (and GIT_CONFIG_*) assigned by a builtin other than a
+//     plain statement: `read`, `mapfile`/`readarray`, `getopts`, `printf -v`,
+//     `let` and a `for`/`select` loop variable.
+//   - git run after PATH was changed (an inline `PATH=dir:$PATH git`, `env
+//     PATH=...`, or an earlier `PATH=...;`, `export PATH=...`, `declare PATH=...`,
+//     `mapfile PATH`): bash looks git up in the first PATH entry first, so a
+//     file named git that a branch committed there runs instead of git. The
+//     stubs PATH that exempts the updater run (below) never qualifies for git.
 //   - git --shallow-file before the subcommand: it reads a chosen file (.env)
 //     and quotes it in its error.
 //   - --upload-pack (and its abbreviations such as --upl), --exec and
@@ -450,6 +458,57 @@ function blockConfigHome(what) {
         `Blocked: \`${what}\` moves the folder git reads its global config from, and a config there can name a ` +
             'program for git to run. Run git with the HOME you already have.'
     );
+}
+
+// PATH is always exported. `PATH=planted:$PATH git log` (or the same as a
+// statement of its own, `export PATH=...`, `read PATH`) makes bash look git up
+// in planted/ first, and a file named git that a branch committed there runs
+// instead of git, under the pre-approved git rules. The stubs PATH that lets the
+// updater run is a directory under tests/ in the same checkout, so a branch can
+// plant a git there too: no PATH change qualifies for git. A key `PATH+` is a
+// `PATH+=value` assignment.
+const PATH_ENV = /^PATH\+?$/;
+
+function blockGitPath(what) {
+    return block(
+        `Blocked: \`${what}\` changes PATH before git, so bash may look git up in a directory a branch committed ` +
+            'and run that file instead. Run git with the PATH you already have.'
+    );
+}
+
+// What a builtin assigns to when it is not a plain `NAME=value` statement:
+// the name's effect is that of the statement. Returns a refusal for HOME,
+// XDG_CONFIG_HOME and GIT_CONFIG_*, notes a PATH change on `state` (refused when
+// git runs), and is null for any other name.
+function noteAssigned(name, what, state) {
+    const base = name.replace(/\[.*$/, '').replace(/\+$/, '');
+    if (CONFIG_HOME_ENV.test(base)) return blockConfigHome(what);
+    if (base.includes('GIT_CONFIG')) return blockSettingsEnvOverwrite(what);
+    if (PATH_ENV.test(base)) state.pathChanged = true;
+    return null;
+}
+
+// The words a builtin takes as the names it assigns. `read`, `mapfile` and
+// `readarray` take their names as operands (an option's value, such as `-n 3`,
+// is never a name worth reading, so every non-option word is looked at);
+// `printf -v NAME`, `getopts OPTS NAME` and `let NAME=expr` name it in their own way.
+function assignedNames(cmd, args) {
+    if (cmd === 'read' || cmd === 'mapfile' || cmd === 'readarray' || cmd === 'getopts') {
+        return args.filter((a) => !a.startsWith('-'));
+    }
+    if (cmd === 'printf') {
+        const names = [];
+        for (let k = 0; k < args.length; k++) {
+            if (args[k] === '--') break;
+            if (args[k] === '-v') names.push(args[++k] ?? '');
+            else if (args[k].startsWith('-v')) names.push(args[k].slice(2));
+        }
+        return names;
+    }
+    if (cmd === 'let') {
+        return args.map((a) => a.match(/^([A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?)(?:[-+*/%&|^]|<<|>>)?=/)?.[1]).filter((n) => n !== undefined);
+    }
+    return [];
 }
 
 function checkGit(args, inlineEnv = {}, exported = {}) {
@@ -1217,12 +1276,19 @@ function checkSegment(words, state) {
             if (w[0] === 'function' || (w[0] === 'coproc' && w[2] === '{')) w.shift();
             w.shift();
         }
+        // `for HOME in planted; do git diff; done` assigns HOME before the body runs.
+        if ((w[0] === 'for' || w[0] === 'select') && w.length > 1) {
+            const r = noteAssigned(w[1], `${w[0]} ${w[1]}`, state);
+            if (r) return r;
+        }
         if (!w.length) {
             // Only assignments: they set shell variables, and an exported one keeps its export.
             const name = Object.keys(inlineEnv).find((k) => k.includes('GIT_CONFIG'));
             if (name !== undefined) return blockSettingsEnvOverwrite(`${name}=${inlineEnv[name]}`);
             const home = Object.keys(inlineEnv).find((k) => CONFIG_HOME_ENV.test(k));
             if (home !== undefined) return blockConfigHome(`${home}=${inlineEnv[home]}`);
+            // PATH is exported already, so `PATH=planted:$PATH; git log` reaches the git after it.
+            if (Object.keys(inlineEnv).some((k) => PATH_ENV.test(k))) state.pathChanged = true;
             return null;
         }
         // A command word the shell reads as a checked command (`{git,}`,
@@ -1340,7 +1406,11 @@ function checkSegment(words, state) {
         // them directly; the words are also looked through below, so both readings
         // are checked). `flock FILE -c CMD` runs CMD with `sh -c`. Either string
         // sees this segment's PATH, as the shell it starts does.
-        const wrapped = () => Object.assign(Object.create(state), { exportedPath: inlineEnv.PATH ?? state.exportedPath });
+        const wrapped = () =>
+            Object.assign(Object.create(state), {
+                exportedPath: inlineEnv.PATH ?? state.exportedPath,
+                pathChanged: state.pathChanged || Object.keys(inlineEnv).some((k) => PATH_ENV.test(k)),
+            });
         if (cmd === 'watch') {
             const r = checkCommand(w.slice(idx).join(' '), wrapped());
             if (r) return r;
@@ -1365,7 +1435,12 @@ function checkSegment(words, state) {
     const envPath = inlineEnv.PATH ?? state.exportedPath;
     // Nested analysis (`bash -c '...'`, `eval`) sees this segment's PATH, but
     // anything it exports stays inside it, as in a real subshell.
-    const nested = (extra = {}) => Object.assign(Object.create(state), { exportedPath: envPath }, extra);
+    const nested = (extra = {}) =>
+        Object.assign(
+            Object.create(state),
+            { exportedPath: envPath, pathChanged: state.pathChanged || Object.keys(inlineEnv).some((k) => PATH_ENV.test(k)) },
+            extra
+        );
 
     // `export -n NAME` and `declare +x NAME` un-export NAME, and an operand
     // that assigns (`declare GIT_CONFIG_COUNT=0`, `readonly ...`) overwrites it.
@@ -1380,11 +1455,18 @@ function checkSegment(words, state) {
             if (!exports && eq !== -1 && a.slice(0, eq).includes('GIT_CONFIG')) return blockSettingsEnvOverwrite(`${cmd} ${a}`);
             const name = eq === -1 ? a : a.slice(0, eq);
             if (eq !== -1 && CONFIG_HOME_ENV.test(name)) return blockConfigHome(`${cmd} ${a}`);
+            if (eq !== -1 && PATH_ENV.test(name)) state.pathChanged = true;
             if (unexports && removesSettingsEnv(eq === -1 ? a : a.slice(0, eq))) {
                 const flags = args.filter((o) => o.startsWith('-') || o.startsWith('+'));
                 return blockSettingsEnvRemoval([cmd, ...flags, a].join(' '));
             }
         }
+    }
+    // `read HOME`, `printf -v HOME`, `mapfile PATH`, `let HOME=...`: the same
+    // assignment as the statement, made by a builtin.
+    for (const name of assignedNames(cmd, args)) {
+        const r = noteAssigned(name, `${cmd} ${name}`, state);
+        if (r) return r;
     }
     // `unset GIT_CONFIG_COUNT` removes the settings env for every later command,
     // and so do `unset ${!GIT_CONFIG@}` and `v=GIT_CONFIG_COUNT; unset $v`.
@@ -1410,6 +1492,7 @@ function checkSegment(words, state) {
         return checkGh(args, envRepo);
     }
     if (cmd === 'git') {
+        if (state.pathChanged || Object.keys(inlineEnv).some((k) => PATH_ENV.test(k))) return blockGitPath('PATH=... git');
         const refusal = checkGit(args, inlineEnv, state.exportedEnv ?? {});
         if (refusal || !state.envCleared) return refusal;
         return block(
