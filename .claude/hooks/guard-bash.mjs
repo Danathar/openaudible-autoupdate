@@ -56,7 +56,9 @@
 //     reads its global config from, which the settings env does not replace.
 //   - those same names (and GIT_CONFIG_*) assigned by a builtin other than a
 //     plain statement: `read`, `mapfile`/`readarray`, `getopts`, `printf -v`,
-//     `let` and a `for`/`select` loop variable.
+//     `let` and a `for`/`select` loop variable; and any of them named in an
+//     arithmetic command or expansion (`(( PATH = 1 ))`, `: $(( HOME = 1 ))`),
+//     which assigns with no NAME=value word.
 //   - git run after PATH was changed (an inline `PATH=dir:$PATH git`, `env
 //     PATH=...`, or an earlier `PATH=...;`, `export PATH=...`, `declare PATH=...`,
 //     `mapfile PATH`): bash looks git up in the first PATH entry first, so a
@@ -168,10 +170,11 @@ import { fileURLToPath } from 'node:url';
 // Reading the command line as the shell would is shared with the other
 // repositories that carry this guard; see shell-reader.mjs.
 import {
-    ARGUMENT_ONLY_PROGRAMS, BUDGET_MS, COMMAND_STRING_SEPARATORS, commandNameReader, commandStrings, EXEC_GIT_CONFIG,
+    ARGUMENT_ONLY_PROGRAMS, BUDGET_MS, closeParen, COMMAND_STRING_SEPARATORS, commandNameReader, commandStrings, EXEC_GIT_CONFIG,
     expandWrapperOptions, extractSubstitutions, FIND_EXEC, fishScripts, firstWord, GIT_EXEC_OPTION, GIT_SHORT_UPLOAD_PACK,
     GIT_UPLOAD_PACK_OPTION, GIT_UPLOAD_PACK_SUBCOMMANDS, isAssignment, KEYWORDS, MAX_BRACE_FORMS, MAX_UNLISTED_INNER,
-    OverBudget, REFUSED_GIT_OPTION, RISKY_GIT_CONFIG, riskyEnv, SAFE_ENV, SHELLS, spend, startBudget, tokenize, unquoted,
+    OverBudget, readAnsiC, readHeredocStart, REFUSED_GIT_OPTION, RISKY_GIT_CONFIG, riskyEnv, SAFE_ENV, SHELLS,
+    skipHeredocBody, spend, startBudget, tokenize, unquoted,
     WATCHED_ENV, WRAPPERS, wrapperTarget,
 } from './shell-reader.mjs';
 
@@ -509,6 +512,49 @@ function assignedNames(cmd, args) {
         return args.map((a) => a.match(/^([A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?)(?:[-+*/%&|^]|<<|>>)?=/)?.[1]).filter((n) => n !== undefined);
     }
     return [];
+}
+
+// Arithmetic assigns a name with no NAME=value word once its operator has
+// spaces round it: `(( PATH = 1 ))` and `: $(( HOME = 1 ))` set the variable as
+// `let PATH=1` does, and the exported value reaches the next git. The reader
+// splits the parens off and leaves the plain words `PATH = 1`, so the
+// expression is read here from the command line: every whole name between `((`
+// and the paren that closes them is taken as assigned. A name that is only read
+// (`(( PATH ))`) is taken too, which only refuses more. Single-quoted text and
+// quoted heredoc bodies are data, and inside double quotes only `$((` is
+// arithmetic. A single `(` opens a subshell and is not read here, so
+// `( echo PATH )` names nothing.
+const ARITHMETIC_NAME = /(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*/g;
+
+function arithmeticNames(input) {
+    const names = [];
+    let inSingle = false;
+    let inDouble = false;
+    const pending = []; // heredocs started on the current line
+    for (let i = 0; i < input.length; i++) {
+        const c = input[i];
+        if (c === '\\' && !inSingle) {
+            i++;
+        } else if (c === '$' && input[i + 1] === "'" && !inSingle && !inDouble) {
+            i = readAnsiC(input, i + 2).next - 1;
+        } else if (c === "'" && !inDouble) {
+            inSingle = !inSingle;
+        } else if (c === '"' && !inSingle) {
+            inDouble = !inDouble;
+        } else if (!inSingle && !inDouble && c === '<' && input[i + 1] === '<' && input[i + 2] !== '<') {
+            const h = readHeredocStart(input, i);
+            if (h.delim) pending.push(h);
+            i = h.next - 1;
+        } else if (!inSingle && !inDouble && c === '\n' && pending.length) {
+            while (pending.length && pending[0].quoted) i = skipHeredocBody(input, i + 1, pending.shift().delim) - 1;
+            pending.length = 0;
+        } else if (!inSingle && c === '(' && input[i + 1] === '(' && (!inDouble || input[i - 1] === '$')) {
+            const end = closeParen(input, i + 1);
+            names.push(...(input.slice(i + 2, end).match(ARITHMETIC_NAME) ?? []));
+            i = end - 1;
+        }
+    }
+    return names;
 }
 
 function checkGit(args, inlineEnv = {}, exported = {}) {
@@ -1627,6 +1673,10 @@ function checkSegment(words, state) {
 
 /** Analyse a command line. Returns null if allowed, else { blocked, reason }. */
 export function checkCommand(command, state = {}) {
+    for (const name of arithmeticNames(command)) {
+        const r = noteAssigned(name, `(( ${name} ))`, state);
+        if (r) return r;
+    }
     for (const sub of extractSubstitutions(command)) {
         const r = checkCommand(sub, state);
         if (r) return r;

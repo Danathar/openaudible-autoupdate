@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const CORPUS_PATH = `${ROOT}tests/fixtures/gate-refusal-corpus.json`;
-const CORPUS_SHA256 = '64246cb4d92cf1226a9eb07d3f1381942850fb090cfa59fcf50e23eb5c212558';
+const CORPUS_SHA256 = '8c013df1e981d6a17c6d5c8bd7d5589ff8f33fc798d9f6ce046d58d54844f6ae';
 const settings = JSON.parse(readFileSync(`${ROOT}.claude/settings.json`, 'utf8'));
 const raw = readFileSync(CORPUS_PATH);
 const corpus = JSON.parse(raw.toString('utf8'));
