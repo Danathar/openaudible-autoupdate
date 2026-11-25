@@ -64,6 +64,15 @@
 //     `mapfile PATH`): bash looks git up in the first PATH entry first, so a
 //     file named git that a branch committed there runs instead of git. The
 //     stubs PATH that exempts the updater run (below) never qualifies for git.
+//   - git run after a `cd`, `pushd` or `popd` that may leave the checkout (a bare
+//     `cd`, `cd -`, a `~`, `$`, backtick or glob target, `popd`, or any path that
+//     is not the project root or a literal relative path with no `..` that stays
+//     inside it): every operand check here resolves paths against the checkout,
+//     so `cd /tmp && git diff -- x .env` passed as two in-tree operands while git
+//     ran outside any repository, fell back to --no-index on its own and printed
+//     the file. It is the shell's spelling of `git -C DIR`. `cd tests && git log`
+//     and `cd "$CLAUDE_PROJECT_DIR" && git log` still run. With CDPATH set or
+//     assigned, a relative name that does not start with `./` leaves too.
 //   - git --shallow-file before the subcommand: it reads a chosen file (.env)
 //     and quotes it in its error.
 //   - --upload-pack (and its abbreviations such as --upl), --exec and
@@ -555,6 +564,56 @@ function arithmeticNames(input) {
         }
     }
     return names;
+}
+
+// The words that name the project root to a `cd` without spelling its path.
+const PROJECT_DIRECTORY_WORDS = new Set(['$CLAUDE_PROJECT_DIR', '${CLAUDE_PROJECT_DIR}']);
+
+function checkoutRoot() {
+    const dir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+    try {
+        return realpathSync(dir);
+    } catch {
+        return resolve(dir);
+    }
+}
+
+// The real path of `target` as far as it exists; a name that does not exist
+// resolves as written, so a `cd` that fails to find its directory is not
+// taken for one that leaves.
+function realPathOf(target) {
+    try {
+        return realpathSync(target);
+    } catch {
+        return resolve(target);
+    }
+}
+
+// The directory change `cmd args` makes, as typed, when it may move the shell
+// out of the checkout; null when it is no directory change or one that stays
+// inside. It is the shell's spelling of `git -C DIR`, and every operand check
+// here resolves paths against the checkout, so `cd /some/dir && git diff -- a.env b`
+// passed as two in-tree operands while git ran outside any repository and
+// printed both files. A change stays inside only when its one operand is the
+// project root (a literal path to it, or `$CLAUDE_PROJECT_DIR`) or a literal
+// relative path with no `..` component whose real path is inside the checkout,
+// symlinks resolved. Anything not readable as a literal path leaves: no
+// operand (HOME), `-` (OLDPWD), an option, a `~`, a `$`, a backtick, a glob,
+// and every `popd`, which returns to a directory the string does not name. With
+// CDPATH set, bash searches it for a relative name that does not start with
+// `./`, so such names leave too.
+function directoryChangeLeaves(cmd, args, cdpath) {
+    if (cmd !== 'cd' && cmd !== 'pushd' && cmd !== 'popd') return null;
+    const shown = [cmd, ...args].join(' ');
+    if (cmd === 'popd' || args.length !== 1) return shown;
+    const target = args[0];
+    if (PROJECT_DIRECTORY_WORDS.has(target)) return null;
+    if (!target || /^[-+~]/.test(target) || /[$`*?[\\{}!'"]/.test(target)) return shown;
+    const root = checkoutRoot();
+    if (target.startsWith('/')) return realPathOf(target) === root ? null : shown;
+    if (target.split('/').includes('..') || (cdpath && !target.startsWith('./'))) return shown;
+    const resolved = realPathOf(join(root, target));
+    return resolved === root || resolved.startsWith(`${root}/`) ? null : shown;
 }
 
 function checkGit(args, inlineEnv = {}, exported = {}) {
@@ -1533,11 +1592,24 @@ function checkSegment(words, state) {
         }
         return null;
     }
+    // `cd /tmp && git diff -- x .env`: see directoryChangeLeaves().
+    const moved = directoryChangeLeaves(cmd, args, state.cdpath || 'CDPATH' in process.env);
+    if (moved !== null && state.leftCheckout === undefined) state.leftCheckout = moved;
     if (cmd === 'gh') {
         const envRepo = inlineEnv.GH_REPO ?? state.exportedGhRepo ?? null;
         return checkGh(args, envRepo);
     }
     if (cmd === 'git') {
+        if (state.leftCheckout !== undefined) {
+            return block(
+                `Blocked: \`${state.leftCheckout}\` may move the shell out of this checkout before git runs, and every ` +
+                    'operand check here resolves paths against the checkout: `cd /some/dir && git diff -- a.env b` passed ' +
+                    'as two in-tree operands, then git ran outside any repository, fell back to --no-index on its own and ' +
+                    'printed both files. It is the shell\'s spelling of `git -C DIR`, which is refused for the same reason. ' +
+                    'A cd to the project root (`cd "$CLAUDE_PROJECT_DIR"`) or into a literal relative path inside the ' +
+                    'checkout (`cd tests`) is not refused; otherwise run git from the checkout and name the paths.'
+            );
+        }
         if (state.pathChanged || Object.keys(inlineEnv).some((k) => PATH_ENV.test(k))) return blockGitPath('PATH=... git');
         const refusal = checkGit(args, inlineEnv, state.exportedEnv ?? {});
         if (refusal || !state.envCleared) return refusal;
@@ -1673,6 +1745,7 @@ function checkSegment(words, state) {
 
 /** Analyse a command line. Returns null if allowed, else { blocked, reason }. */
 export function checkCommand(command, state = {}) {
+    if (command.includes('CDPATH')) state.cdpath = true;
     for (const name of arithmeticNames(command)) {
         const r = noteAssigned(name, `(( ${name} ))`, state);
         if (r) return r;
