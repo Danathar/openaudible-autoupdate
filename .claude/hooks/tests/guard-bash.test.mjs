@@ -92,6 +92,8 @@ const allowed = [
     'cd "$CLAUDE_PROJECT_DIR" && git log -1',
     'cd ${CLAUDE_PROJECT_DIR} && git log -1',
     `cd ${PROJECT} && git log -1`,
+    'cd . && git log -1',
+    'CDPATH=/tmp; cd ./tests && git log -1',
     'cd /tmp && echo done',
     'git -C . status',
     'node --test scripts/tests/*.test.mjs',
@@ -550,6 +552,12 @@ const blocked = [
     ['cd tests/.. && git status', 'may move the shell out of this checkout'],
     ['cd /tmp/* && git status', 'may move the shell out of this checkout'],
     ['popd && git status', 'may move the shell out of this checkout'],
+    // an operand inside the checkout does not make a popd, or a cd with two operands, readable
+    ['popd tests && git status', '`popd tests` may move the shell out of this checkout'],
+    ['cd tests extra && git status', '`cd tests extra` may move the shell out of this checkout'],
+    // the first directory change that leaves is the one named
+    ['cd /tmp && cd /etc && git status', '`cd /tmp` may move the shell out of this checkout'],
+    ['CDPATH=/tmp; cd tests/./ && git status', 'may move the shell out of this checkout'],
     ['builtin cd /tmp && git status', 'may move the shell out of this checkout'],
     ['command cd /tmp && git status', 'may move the shell out of this checkout'],
     ['cd tests/dirlink && git status', 'may move the shell out of this checkout'],
@@ -1335,6 +1343,44 @@ for (const [command, fragment] of blocked) {
 
 test('ignores non-Bash tools', () => {
     assert.equal(run('gh pr create', 'Edit').status, 0);
+});
+
+// The directory-change rule also reads the hook's own environment.
+function runWithEnv(command, changes) {
+    const env = { ...process.env, CLAUDE_PROJECT_DIR: PROJECT, ...changes };
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command } });
+    return spawnSync(process.execPath, [HOOK], { input, encoding: 'utf8', cwd: PROJECT, env });
+}
+
+test('a CDPATH already in the environment makes a bare relative cd leave the checkout', () => {
+    const r = runWithEnv('cd tests && git status', { CDPATH: '/tmp' });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /`cd tests` may move the shell out of this checkout/);
+    assert.equal(runWithEnv('cd ./tests && git status', { CDPATH: '/tmp' }).status, 0);
+});
+
+test('without CLAUDE_PROJECT_DIR the checkout is the working directory', () => {
+    const r = runWithEnv('cd tests && git status', { CLAUDE_PROJECT_DIR: undefined });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(runWithEnv('cd tests/dirlink && git status', { CLAUDE_PROJECT_DIR: undefined }).status, 2);
+});
+
+test('a project directory that does not resolve is compared as written', () => {
+    const r = runWithEnv('cd tests && git status', { CLAUDE_PROJECT_DIR: join(PROJECT, 'missing') });
+    assert.equal(r.status, 0, r.stderr);
+});
+
+test('the directory-change refusal says why, and what still works', () => {
+    const { stderr } = run('cd /tmp && git status');
+    for (const part of [
+        'operand check here resolves paths against the checkout: `cd /some/dir',
+        'fell back to --no-index on its own',
+        "the shell's spelling of `git -C DIR`",
+        'A cd to the project root (`cd "$CLAUDE_PROJECT_DIR"`)',
+        'otherwise run git from the checkout and name the paths',
+    ]) {
+        assert.ok(stderr.includes(part), `stderr should mention ${part}: ${stderr}`);
+    }
 });
 
 test('empty command is allowed', () => {
