@@ -396,6 +396,13 @@ const allowed = [
     'git grep "env -i"',
     // --attr-source takes the next word as its value and names no repository.
     'git --attr-source HEAD log -p -1',
+    // an apostrophe in a comment or a here-document body opens no quote
+    "git log -1 # it's the last one\ngit status",
+    "cat <<EOF\nit's\nEOF\ngit status",
+    "cat <<EOF\nit's \\$(git push --force origin main)\nEOF",
+    "cat <<'EOF'\nit's $(git push --force origin main)\nEOF\ngit status",
+    "echo '# it' # it's\ngit log -1",
+    '(( n = 1 << 2 ))\ngit status',
 ];
 
 const blocked = [
@@ -692,6 +699,29 @@ const blocked = [
     ['env -S "GH_PROMPT_DISABLED=1" gh pr create --repo someone/other --base main --head x', 'someone/other'],
     ['env FOO=1 gh issue create --repo someone/other --title -Sx', 'someone/other'],
     ['env sudo -S git push upstream main', 'privilege'],
+    // an apostrophe in a comment or an unquoted heredoc body opens no quote, so
+    // the substitution after it runs
+    ["git log -1 # it's the last one\necho $(git push --force origin main)", 'force push'],
+    ["echo a # don't\necho `git push --force origin main`", 'force push'],
+    ["echo a \\\n# it's\necho $(git push --force origin main)", 'force push'],
+    ["cat <<EOF\nit's\n$(git push --force origin main)\nEOF", 'force push'],
+    ["cat <<EOF\ndon't\n`git push --force origin main`\nEOF", 'force push'],
+    ["cat <<EOF\nit's\nEOF\necho $(git push --force origin main)", 'force push'],
+    ["cat <<A; cat <<'B'; cat <<C\nit's\nA\n$(ls)\nB\nit's $(git push --force origin main)\nC", 'force push'],
+    ["echo \"$(echo a # it's\n)\"\ngit push --force origin main", 'force push'],
+    ["git log -1 # $(git push --force origin main)", 'force push'],
+    ["echo a # it's\n(( PATH = 1 )); git log -1", 'changes PATH before git'],
+    ["cat <<EOF\nit's\n$(( PATH = 1 ))\nEOF\ngit log -1", 'changes PATH before git'],
+    // ` #` inside `${...}` is a pattern, not a comment. The reader splits
+    // `${line%% #*}` at the space, so `#*}` reads as a wildcard command name
+    // that could match the updater, and that refusal comes first here.
+    ['x=${line%% #*}; git push --force origin main', 'would execute openaudible-autoupdate.sh'],
+    ['x=$(echo ${line%% #*}); git push --force origin main', 'force push'],
+    ['x="$(echo ${line%% #*})"; echo $(git push --force origin main)', 'force push'],
+    ['echo ${x/ #/$(git push --force origin main)}', 'force push'],
+    // a `<<` no line ends may be a shift, so the lines after it are commands
+    ['(( n = 1 << 2 ))\ngit push --force origin main', 'force push'],
+    ['(( n = 1 << 2 ))\ncat <(git push --force origin main)', 'force push'],
     // a backslash-quoted heredoc delimiter ends the body like a quoted one
     ['cat <<\\EOF\nx\nEOF\nsudo ls', 'privilege'],
     ['cat <<E\\OF\nx\nEOF\nsudo ls', 'privilege'],
