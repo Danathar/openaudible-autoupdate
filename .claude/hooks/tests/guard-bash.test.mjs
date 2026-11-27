@@ -403,6 +403,10 @@ const allowed = [
     "cat <<'EOF'\nit's $(git push --force origin main)\nEOF\ngit status",
     "echo '# it' # it's\ngit log -1",
     '(( n = 1 << 2 ))\ngit status',
+    // env -C into the checkout stays inside it
+    'env -C . git log -1',
+    'env -C tests git log -1',
+    'env --chdir=tests git log -1',
 ];
 
 const blocked = [
@@ -1131,6 +1135,12 @@ const blocked = [
     // wrapper's own options: `env -u -iu git` unsets `-iu` and runs git.
     ['env -u -iu git push --force origin main', 'force'],
     ['env -C -iu git push --force origin main', 'force'],
+    // env -C / --chdir starts git outside the checkout, as cd does
+    ['env -C /tmp git diff -- x .env', 'starts git outside this checkout'],
+    ['env --chdir=/tmp git diff -- x .env', 'starts git outside this checkout'],
+    ['env --chdir /tmp git diff -- x .env', 'starts git outside this checkout'],
+    ['env -C/tmp git diff -- x .env', 'starts git outside this checkout'],
+    ['env -C ../wt git diff -- x .env', 'starts git outside this checkout'],
     ['env --unset -iu git push --force origin main', 'force'],
     ['xargs -a -rP git push --force origin main', 'xargs git'],
     ['exec -a -la ./openaudible-autoupdate.sh', 'would execute'],
