@@ -210,6 +210,13 @@
             "original": "configKey !== null",
             "replacement": "true",
             "reason": "Equivalent in the safe.* refusal: configKey is null only when the option is neither `-c` nor `--config-env`, and then `/^safe\\./i.test(null)` tests the text \"null\", which never starts with `safe.`, so the refusal is the same either way."
+        },
+        {
+            "file": ".claude/hooks/guard-bash.mjs",
+            "mutator": "Regex",
+            "original": "/^-C./",
+            "replacement": "/-C./",
+            "reason": "Harmless over-refusal in the env -C refusal: the unanchored pattern also matches an env word with -C past its start, such as `--C/tmp` (env rejects it as an unrecognized option) or the value of `--argv0=x-C/tmp`; the directory then read starts with `-`, so the command is refused, never allowed."
         }
     ]
 }

@@ -407,6 +407,7 @@ const allowed = [
     'env -C . git log -1',
     'env -C tests git log -1',
     'env --chdir=tests git log -1',
+    'env -Ctests git log -1',
 ];
 
 const blocked = [
@@ -1141,6 +1142,10 @@ const blocked = [
     ['env --chdir /tmp git diff -- x .env', 'starts git outside this checkout'],
     ['env -C/tmp git diff -- x .env', 'starts git outside this checkout'],
     ['env -C ../wt git diff -- x .env', 'starts git outside this checkout'],
+    // the refusal names the option as written, and the first env -C that leaves
+    ['env -C /tmp git log -1', '`env -C /tmp` starts git outside this checkout'],
+    ['env -C/tmp git log -1', '`env -C/tmp` starts git outside this checkout'],
+    ['env -C /tmp env -C /var git log -1', '`env -C /tmp` starts git outside this checkout'],
     ['env --unset -iu git push --force origin main', 'force'],
     ['xargs -a -rP git push --force origin main', 'xargs git'],
     ['exec -a -la ./openaudible-autoupdate.sh', 'would execute'],
@@ -1418,6 +1423,18 @@ test('the directory-change refusal says why, and what still works', () => {
         "the shell's spelling of `git -C DIR`",
         'A cd to the project root (`cd "$CLAUDE_PROJECT_DIR"`)',
         'otherwise run git from the checkout and name the paths',
+    ]) {
+        assert.ok(stderr.includes(part), `stderr should mention ${part}: ${stderr}`);
+    }
+});
+
+test('the env -C refusal says why, and what still works', () => {
+    const { stderr } = run('env -C /tmp git log -1');
+    for (const part of [
+        'resolves paths against the wrong directory: `env -C /some/dir git diff -- a.env b` passed as two',
+        'in-tree operands, then git ran outside any repository, fell back to --no-index on its own and',
+        'printed both files. It is the same move as `cd /some/dir && git ...`. Run git from the checkout',
+        'and name the paths.',
     ]) {
         assert.ok(stderr.includes(part), `stderr should mention ${part}: ${stderr}`);
     }
