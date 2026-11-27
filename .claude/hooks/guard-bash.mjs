@@ -1444,6 +1444,15 @@ function checkSegment(words, state) {
                 if (a === '-i' || a === '--ignore-environment' || a === '-') {
                     state = Object.assign(Object.create(state), { envCleared: true });
                 }
+                // `env -C DIR git diff -- x .env` starts git in DIR, the same move
+                // as `cd DIR && git ...` (see directoryChangeLeaves()).
+                if (a === '-C' || a === '--chdir' || a.startsWith('--chdir=') || /^-C./.test(a)) {
+                    const separate = a === '-C' || a === '--chdir';
+                    const dir = separate ? (w[k + 1] ?? '') : a.startsWith('--chdir=') ? a.slice(8) : a.slice(2);
+                    if (state.envMoved === undefined && directoryChangeLeaves('cd', [dir], false) !== null) {
+                        state = Object.assign(Object.create(state), { envMoved: separate ? `env ${a} ${dir}` : `env ${a}` });
+                    }
+                }
                 if (['-u', '--unset', '-C', '--chdir', '-a', '--argv0'].includes(a)) {
                     k++;
                     continue;
@@ -1592,7 +1601,17 @@ function checkSegment(words, state) {
         }
         if (state.pathChanged || Object.keys(inlineEnv).some((k) => PATH_ENV.test(k))) return blockGitPath('PATH=... git');
         const refusal = checkGit(args, inlineEnv, state.exportedEnv ?? {});
-        if (refusal || !state.envCleared) return refusal;
+        if (refusal) return refusal;
+        if (state.envMoved !== undefined) {
+            return block(
+                `Blocked: \`${state.envMoved}\` starts git outside this checkout, where every operand check here ` +
+                    'resolves paths against the wrong directory: `env -C /some/dir git diff -- a.env b` passed as two ' +
+                    'in-tree operands, then git ran outside any repository, fell back to --no-index on its own and ' +
+                    'printed both files. It is the same move as `cd /some/dir && git ...`. Run git from the checkout ' +
+                    'and name the paths.'
+            );
+        }
+        if (!state.envCleared) return refusal;
         return block(
             'Blocked: `env -i` (`--ignore-environment`, a lone `-`) and `exec -c` run git without the GIT_CONFIG_* ' +
                 'settings env in .claude/settings.json that stops a committed repository folder from running a ' +
